@@ -10,7 +10,6 @@ requires-python = ">=3.8"
 dependencies = [
     "psutil>=7.1.0",
     "tomli>=2.2.1 ; python_full_version < '3.11'",
-    "typing-extensions>=4.13.2 ; python_full_version < '3.11'",
 ]
 
 [project.scripts]
