@@ -7,7 +7,7 @@ from typing import Optional
 
 import psutil
 
-from .constants import DEFAULT_META_DIR
+from .constants import DEFAULT_META_DIR, META_SUFFIX
 from .types import CmdType, DmonMeta, PathType
 
 
@@ -178,7 +178,7 @@ def list_processes(dir: PathType):
     metas = []
     target_dmon_dir = Path(dir).resolve()
     if target_dmon_dir.exists() and target_dmon_dir.is_dir():
-        for meta_file in target_dmon_dir.glob("*.meta.json"):
+        for meta_file in target_dmon_dir.glob(f"*{META_SUFFIX}"):
             name = meta_file.stem.rsplit(".", 2)[0]
             meta = load_meta(meta_file)
             if meta is not None:
