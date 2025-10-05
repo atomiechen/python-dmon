@@ -4,7 +4,7 @@ import sys
 
 from .config import get_command_config
 from .control import list_processes, restart, start, stop, status
-from .constants import LOG_PATH_TEMPLATE, META_PATH_TEMPLATE
+from .constants import DEFAULT_META_DIR, LOG_PATH_TEMPLATE, META_PATH_TEMPLATE
 
 
 def main():
@@ -90,10 +90,16 @@ def main():
     )
 
     # list subcommand
-    _sp_list = subparsers.add_parser(
+    sp_list = subparsers.add_parser(
         "list",
         help="List all running processes",
         # formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    sp_list.add_argument(
+        "dir",
+        type=Path,
+        help=f"Directory to look for meta files (default: {DEFAULT_META_DIR})",
+        nargs="?",
     )
 
     args = parser.parse_args()
@@ -131,7 +137,8 @@ def main():
         else:
             sys.exit(status(meta_path))
     elif args.command == "list":
-        sys.exit(list_processes())
+        dir = args.dir or DEFAULT_META_DIR
+        sys.exit(list_processes(dir))
 
 
 if __name__ == "__main__":

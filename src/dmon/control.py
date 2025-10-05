@@ -173,10 +173,10 @@ def status(meta_path: PathType):
         return 1
 
 
-def list_processes():
+def list_processes(dir: PathType):
     headers = ("NAME", "PID", "CMD", "START TIME", "LOG PATH")
     metas = []
-    target_dmon_dir = DEFAULT_META_DIR.resolve()
+    target_dmon_dir = Path(dir).resolve()
     if target_dmon_dir.exists() and target_dmon_dir.is_dir():
         for meta_file in target_dmon_dir.glob("*.meta.json"):
             name = meta_file.stem.rsplit(".", 2)[0]
