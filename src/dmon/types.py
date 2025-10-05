@@ -23,5 +23,5 @@ class DmonCommandConfig(TypedDict):
 class DmonMeta(DmonCommandConfig):
     pid: int
     popen_kwargs: Dict
-    start_time: float
-    start_time_human: str
+    create_time: float
+    create_time_human: str

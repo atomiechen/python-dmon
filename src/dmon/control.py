@@ -64,33 +64,37 @@ def start(cfg: DmonCommandConfig):
     # Open the log file (append mode)
     with open(log_path, "a") as lof:
         # Start the child process with stdout/stderr redirected to the log
-        proc = subprocess.Popen(cfg["cmd"], stdout=lof, stderr=lof, env=cfg["env"], **kwargs)
-        start_time = time.time()
-        start_time_human = time.strftime(
-            "%Y-%m-%d %H:%M:%S", time.localtime(start_time)
+        proc = subprocess.Popen(
+            cfg["cmd"], stdout=lof, stderr=lof, env=cfg["env"], **kwargs
         )
+        try:
+            p = psutil.Process(proc.pid)
+            create_time = p.create_time()
+            create_time_human = time.strftime(
+                "%Y-%m-%d %H:%M:%S", time.localtime(create_time)
+            )
+        except psutil.NoSuchProcess:
+            # process already exited?
+            create_time = -1
+            create_time_human = "N/A"
 
+    meta: DmonMeta = {
+        "name": cfg["name"],
+        "pid": proc.pid,
+        "meta_path": str(meta_path),
+        "log_path": str(log_path),
+        "cmd": cfg["cmd"],
+        "env": cfg["env"],
+        "popen_kwargs": kwargs,
+        "create_time": create_time,
+        "create_time_human": create_time_human,
+    }
     dump_meta(
-        {
-            "name": cfg["name"],
-            "pid": proc.pid,
-            "meta_path": str(meta_path),
-            "log_path": str(log_path),
-            "cmd": cfg["cmd"],
-            "env": cfg["env"],
-            "popen_kwargs": kwargs,
-            "start_time": start_time,
-            "start_time_human": start_time_human,
-        },
+        meta,
         meta_path,
     )
 
-    print(
-        f"PID: {proc.pid}\n"
-        f"START TIME: {start_time_human}\n"
-        f"META PATH: {meta_path}\n"
-        f"LOG PATH: {log_path}"
-    )
+    print_status(meta)
     return 0
 
 
@@ -110,6 +114,7 @@ def stop(
     except psutil.NoSuchProcess:
         print(f"Process {pid} not found (already dead)")
         meta_path.unlink(missing_ok=True)
+        print_status(meta)
         return 1
 
     # send SIGTERM first for graceful shutdown (if platform supports)
@@ -141,6 +146,8 @@ def stop(
         meta_path.unlink(missing_ok=True)
     except OSError:
         pass
+
+    print_status(meta)
     return 0
 
 
@@ -149,6 +156,7 @@ def restart(
     timeout=5.0,
 ):
     stop(cfg["meta_path"], timeout)
+    print("--- Restarting ---")
     return start(cfg)
 
 
@@ -159,18 +167,40 @@ def status(meta_path: PathType):
         print(f"Meta file not found: {meta_path} (maybe not started?)")
         return 1
 
-    pid = meta["pid"]
+    print_status(meta)
+    return 0
 
-    if psutil.pid_exists(pid):
-        print(f"Process {pid} is running")
-        return 0
-    else:
-        print(f"Process {pid} is NOT running")
-        return 1
+
+def check_running(pid: int, create_time: float) -> bool:
+    """
+    Check if a process with given PID and create_time is running.
+    """
+    # return psutil.pid_exists(pid)
+    if create_time < 0:
+        return False
+    try:
+        p = psutil.Process(pid)
+        return abs(p.create_time() - create_time) < 1e-3
+    except psutil.NoSuchProcess:
+        return False
+
+
+def print_status(meta: DmonMeta):
+    pid = meta["pid"]
+    status = "Running" if check_running(pid, meta["create_time"]) else "Exited"
+    print(
+        f"NAME: {meta['name']}\n"
+        f"PID: {pid}\n"
+        f"STATUS: {status}\n"
+        f"CMD: {meta['cmd']}\n"
+        f"CREATE TIME: {meta['create_time_human']}\n"
+        f"LOG PATH: {meta['log_path']}\n"
+        f"META PATH: {meta['meta_path']}"
+    )
 
 
 def list_processes(dir: PathType):
-    headers = ("NAME", "PID", "CMD", "START TIME", "LOG PATH")
+    headers = ("NAME", "PID", "STATUS", "CMD", "CREATE TIME", "LOG PATH")
     metas = []
     target_dmon_dir = Path(dir).resolve()
     if target_dmon_dir.exists() and target_dmon_dir.is_dir():
@@ -182,14 +212,17 @@ def list_processes(dir: PathType):
                     (
                         name,
                         meta["pid"],
+                        "Running"
+                        if check_running(meta["pid"], meta["create_time"])
+                        else "Exited",
                         meta["cmd"],
-                        meta["start_time_human"],
+                        meta["create_time_human"],
                         meta["log_path"],
                     )
                 )
     metas.sort()
 
-    print(f"Found {len(metas)} running process(es) in {target_dmon_dir}:")
+    print(f"Found {len(metas)} process(es) in {target_dmon_dir}:")
 
     # insert table header
     metas.insert(0, headers)
