@@ -65,8 +65,11 @@ def start(cfg: DmonCommandConfig):
     # Open the log file (append mode)
     with open(log_path, "a") as lof:
         # Start the child process with stdout/stderr redirected to the log
-        full_env = os.environ.copy()
-        full_env.update(cfg["env"])
+        if cfg["override_env"]:
+            full_env = cfg["env"]
+        else:
+            full_env = os.environ.copy()
+            full_env.update(cfg["env"])
         proc = subprocess.Popen(
             cfg["cmd"], stdout=lof, stderr=lof, env=full_env, **kwargs
         )
@@ -88,6 +91,7 @@ def start(cfg: DmonCommandConfig):
         "log_path": str(log_path),
         "cmd": cfg["cmd"],
         "env": cfg["env"],
+        "override_env": cfg["override_env"],
         "popen_kwargs": kwargs,
         "create_time": create_time,
         "create_time_human": create_time_human,

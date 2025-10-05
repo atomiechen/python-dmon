@@ -55,6 +55,7 @@ def validate_command(command, name: str) -> DmonCommandConfig:
         "name": name,
         "cmd": "",
         "env": {},
+        "override_env": False,
         "log_path": "",
         "meta_path": "",
     }

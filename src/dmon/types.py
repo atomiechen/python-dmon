@@ -16,6 +16,7 @@ class DmonCommandConfig(TypedDict):
     name: str
     cmd: CmdType
     env: Dict[str, str]
+    override_env: bool
     meta_path: str
     log_path: str
 

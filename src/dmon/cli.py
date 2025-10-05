@@ -180,6 +180,7 @@ def main():
             "name": args.name,
             "cmd": " ".join(args.command_list) if args.shell else args.command_list,
             "env": {},
+            "override_env": False,
             "meta_path": args.meta_file or META_PATH_TEMPLATE.format(name=args.name),
             "log_path": args.log_file or LOG_PATH_TEMPLATE.format(name=args.name),
         }
