@@ -17,7 +17,7 @@ def main():
         description="Minimal cross-platform daemon manager",
         # formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers = parser.add_subparsers(dest="command")
 
     # start subcommand
     sp_start = subparsers.add_parser(
@@ -182,6 +182,9 @@ def main():
         meta_path = args.meta_file or META_PATH_TEMPLATE.format(name=args.name)
         log_path = args.log_file or LOG_PATH_TEMPLATE.format(name=args.name)
         sys.exit(start(cmd, meta_path, log_path))
+    else:
+        parser.print_help()
+        sys.exit(1)
 
 
 if __name__ == "__main__":
