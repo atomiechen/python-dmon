@@ -1,6 +1,6 @@
 import sys
 from pathlib import Path
-from typing import Optional, Union, cast
+from typing import Optional, cast
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -36,6 +36,23 @@ def load_pyproject_toml():
     return cfg, pyproject_path
 
 
+def validate_command(command, name: str) -> DmonCommandConfig:
+    if isinstance(command, str):
+        command = {"cmd": command}
+    elif isinstance(command, list):
+        # check if it's a list of strings
+        if not all(isinstance(item, str) for item in command):
+            raise TypeError(f"Command '{name}' list items must be strings")
+        command = {"cmd": command}
+    elif not isinstance(command, dict):
+        raise TypeError(
+            f"Command '{name}' must be a string, list of strings, or a table"
+        )
+    elif "cmd" not in command or not isinstance(command["cmd"], str):
+        raise TypeError(f"Command '{name}' must have a 'cmd' string field")
+    return cast(DmonCommandConfig, command)
+
+
 def get_command_config(name: Optional[str] = None):
     """
     Get the command configuration for the given command name from [tool.dmon.commands].
@@ -63,18 +80,19 @@ def get_command_config(name: Optional[str] = None):
             raise ValueError(f"Command '{name}' not found in {path}")
 
     assert isinstance(name, str)
-    command: Union[str, DmonCommandConfig] = commands[name]
-    if isinstance(command, str):
-        command = {"cmd": command}
-    elif isinstance(command, list):
-        # check if it's a list of strings
-        if not all(isinstance(item, str) for item in command):
-            raise TypeError(f"Command '{name}' list items must be strings")
-        command = {"cmd": command}
-    elif not isinstance(command, dict):
-        raise TypeError(
-            f"Command '{name}' must be a string, list of strings, or a table"
-        )
-    elif "cmd" not in command or not isinstance(command["cmd"], str):
-        raise TypeError(f"Command '{name}' must have a 'cmd' string field")
-    return name, cast(DmonCommandConfig, command)
+    command = validate_command(commands[name], name)
+    return name, command
+
+
+def check_name_in_config(name: str) -> bool:
+    """
+    Check if the given command name exists in the [tool.dmon.commands] section of pyproject.toml.
+    Return True if found, False otherwise.
+    """
+    cfg, _ = load_pyproject_toml()
+    commands = cfg.get("tool", {}).get("dmon", {}).get("commands", {})
+
+    if not isinstance(commands, dict):
+        return False
+
+    return name.lower() in commands

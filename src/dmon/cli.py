@@ -1,9 +1,14 @@
 import argparse
 import sys
 
-from .config import get_command_config
+from .config import check_name_in_config, get_command_config
 from .control import list_processes, restart, start, stop, status
-from .constants import DEFAULT_META_DIR, LOG_PATH_TEMPLATE, META_PATH_TEMPLATE
+from .constants import (
+    DEFAULT_META_DIR,
+    DEFAULT_RUN_NAME,
+    LOG_PATH_TEMPLATE,
+    META_PATH_TEMPLATE,
+)
 
 
 def main():
@@ -95,6 +100,36 @@ def main():
         nargs="?",
     )
 
+    # run subcommand
+    sp_run = subparsers.add_parser(
+        "run",
+        help="Run a custom command (not in config) as a daemon",
+        # formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    sp_run.add_argument(
+        "--name",
+        "-n",
+        default=DEFAULT_RUN_NAME,
+        help=f"Name for this command (default: {DEFAULT_RUN_NAME})",
+    )
+    sp_run.add_argument(
+        "--shell", action="store_true", help="Run command in shell (default: False)"
+    )
+    sp_run.add_argument(
+        "--meta-file",
+        help=f"Path to meta file (default: {META_PATH_TEMPLATE})",
+    )
+    sp_run.add_argument(
+        "--log-file",
+        help=f"Path to log file (default: {LOG_PATH_TEMPLATE})",
+    )
+    sp_run.add_argument(
+        "command_list",
+        metavar="command",
+        nargs=argparse.ONE_OR_MORE,
+        help="Command to run",
+    )
+
     args = parser.parse_args()
 
     if args.command in ["start", "restart"]:
@@ -132,6 +167,21 @@ def main():
     elif args.command == "list":
         dir = args.dir or DEFAULT_META_DIR
         sys.exit(list_processes(dir))
+    elif args.command == "run":
+        if not args.name:
+            parser.error("Please provide a non-empty name for the command.")
+        elif check_name_in_config(args.name):
+            parser.error(
+                f"Name '{args.name}' already exists in config. Please choose another name."
+            )
+        if args.shell:
+            cmd = " ".join(args.command_list)
+        else:
+            cmd = args.command_list
+
+        meta_path = args.meta_file or META_PATH_TEMPLATE.format(name=args.name)
+        log_path = args.log_file or LOG_PATH_TEMPLATE.format(name=args.name)
+        sys.exit(start(cmd, meta_path, log_path))
 
 
 if __name__ == "__main__":
