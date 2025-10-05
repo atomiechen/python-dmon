@@ -64,7 +64,7 @@ def start(cfg: DmonCommandConfig):
     # Open the log file (append mode)
     with open(log_path, "a") as lof:
         # Start the child process with stdout/stderr redirected to the log
-        proc = subprocess.Popen(cfg["cmd"], stdout=lof, stderr=lof, **kwargs)
+        proc = subprocess.Popen(cfg["cmd"], stdout=lof, stderr=lof, env=cfg["env"], **kwargs)
         start_time = time.time()
         start_time_human = time.strftime(
             "%Y-%m-%d %H:%M:%S", time.localtime(start_time)
