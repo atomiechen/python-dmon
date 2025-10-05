@@ -52,6 +52,7 @@ def validate_cmd_type(cmd, name: str) -> CmdType:
 
 def validate_command(command, name: str) -> DmonCommandConfig:
     ret: DmonCommandConfig = {
+        "name": name,
         "cmd": "",
         "env": {},
         "log_path": "",

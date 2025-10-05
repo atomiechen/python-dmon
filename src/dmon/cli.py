@@ -177,6 +177,7 @@ def main():
             )
 
         cmd_cfg: DmonCommandConfig = {
+            "name": args.name,
             "cmd": " ".join(args.command_list) if args.shell else args.command_list,
             "env": {},
             "meta_path": args.meta_file or META_PATH_TEMPLATE.format(name=args.name),

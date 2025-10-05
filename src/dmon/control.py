@@ -72,6 +72,7 @@ def start(cfg: DmonCommandConfig):
 
     dump_meta(
         {
+            "name": cfg["name"],
             "pid": proc.pid,
             "meta_path": str(meta_path),
             "log_path": str(log_path),

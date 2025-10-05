@@ -13,6 +13,7 @@ CmdType = Union[str, List[str]]
 
 
 class DmonCommandConfig(TypedDict):
+    name: str
     cmd: CmdType
     env: Dict[str, str]
     meta_path: str
