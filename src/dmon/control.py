@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 import sys
 import subprocess
@@ -64,8 +65,10 @@ def start(cfg: DmonCommandConfig):
     # Open the log file (append mode)
     with open(log_path, "a") as lof:
         # Start the child process with stdout/stderr redirected to the log
+        full_env = os.environ.copy()
+        full_env.update(cfg["env"])
         proc = subprocess.Popen(
-            cfg["cmd"], stdout=lof, stderr=lof, env=cfg["env"], **kwargs
+            cfg["cmd"], stdout=lof, stderr=lof, env=full_env, **kwargs
         )
         try:
             p = psutil.Process(proc.pid)
