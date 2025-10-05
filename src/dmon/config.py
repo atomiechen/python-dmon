@@ -1,13 +1,13 @@
 import sys
 from pathlib import Path
-from typing import Optional, cast
+from typing import Dict, Optional, cast
 
 if sys.version_info >= (3, 11):
     import tomllib
 else:
     import tomli as tomllib
 
-from .types import DmonCommandConfig
+from .types import CmdType, DmonCommandConfig
 
 
 def find_pyproject_toml(start: Optional[Path] = None) -> Path:
@@ -36,21 +36,58 @@ def load_pyproject_toml():
     return cfg, pyproject_path
 
 
-def validate_command(command, name: str) -> DmonCommandConfig:
-    if isinstance(command, str):
-        command = {"cmd": command}
-    elif isinstance(command, list):
-        # check if it's a list of strings
-        if not all(isinstance(item, str) for item in command):
+def validate_cmd_type(cmd, name: str) -> CmdType:
+    if isinstance(cmd, str):
+        return cmd
+    elif isinstance(cmd, list):
+        if not all(isinstance(item, str) for item in cmd):
+            # check if it's a list of strings
             raise TypeError(f"Command '{name}' list items must be strings")
-        command = {"cmd": command}
-    elif not isinstance(command, dict):
+        return cmd
+    else:
         raise TypeError(
-            f"Command '{name}' must be a string, list of strings, or a table"
+            f"Command '{name}' 'cmd' field must be a string, or list of strings; got {type(cmd)}"
         )
-    elif "cmd" not in command or not isinstance(command["cmd"], str):
-        raise TypeError(f"Command '{name}' must have a 'cmd' string field")
-    return cast(DmonCommandConfig, command)
+
+
+def validate_command(command, name: str) -> DmonCommandConfig:
+    ret: DmonCommandConfig = {
+        "cmd": "",
+        "env": {},
+        "log_path": "",
+        "meta_path": "",
+    }
+    if isinstance(command, str) or isinstance(command, list):
+        ret["cmd"] = validate_cmd_type(command, name)
+    elif isinstance(command, dict):
+        if "cmd" not in command:
+            raise TypeError(f"Command '{name}' must have a 'cmd' field")
+        ret["cmd"] = validate_cmd_type(command["cmd"], name)
+
+        if "env" in command:
+            if not isinstance(command["env"], dict) or not all(
+                isinstance(k, str) and isinstance(v, str)
+                for k, v in command["env"].items()
+            ):
+                raise TypeError(
+                    f"Command '{name}' 'env' field must be a table of string to string"
+                )
+            ret["env"] = cast(Dict[str, str], command["env"])
+
+        if "log_path" in command:
+            if not isinstance(command["log_path"], str):
+                raise TypeError(f"Command '{name}' 'log_path' field must be a string")
+            ret["log_path"] = command["log_path"]
+
+        if "meta_path" in command:
+            if not isinstance(command["meta_path"], str):
+                raise TypeError(f"Command '{name}' 'meta_path' field must be a string")
+            ret["meta_path"] = command["meta_path"]
+    else:
+        raise TypeError(
+            f"Command '{name}' must be a string, list of strings, or a table; got {type(command)}"
+        )
+    return ret
 
 
 def get_command_config(name: Optional[str] = None):

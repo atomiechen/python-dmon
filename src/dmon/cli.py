@@ -9,6 +9,7 @@ from .constants import (
     LOG_PATH_TEMPLATE,
     META_PATH_TEMPLATE,
 )
+from .types import DmonCommandConfig
 
 
 def main():
@@ -138,16 +139,16 @@ def main():
         except Exception as e:
             parser.error(str(e))
 
-        meta_path = args.meta_file or META_PATH_TEMPLATE.format(name=name)
-        log_path = (
+        cmd_cfg["meta_path"] = args.meta_file or META_PATH_TEMPLATE.format(name=name)
+        cmd_cfg["log_path"] = (
             args.log_file
             or cmd_cfg.get("log_path")
             or LOG_PATH_TEMPLATE.format(name=name)
         )
         if args.command == "start":
-            sys.exit(start(cmd_cfg["cmd"], meta_path, log_path))
+            sys.exit(start(cmd_cfg))
         else:
-            sys.exit(restart(cmd_cfg["cmd"], meta_path, log_path))
+            sys.exit(restart(cmd_cfg))
     elif args.command in ["stop", "status"]:
         if args.meta_file:
             meta_path = args.meta_file
@@ -174,14 +175,14 @@ def main():
             parser.error(
                 f"Name '{args.name}' already exists in config. Please choose another name."
             )
-        if args.shell:
-            cmd = " ".join(args.command_list)
-        else:
-            cmd = args.command_list
 
-        meta_path = args.meta_file or META_PATH_TEMPLATE.format(name=args.name)
-        log_path = args.log_file or LOG_PATH_TEMPLATE.format(name=args.name)
-        sys.exit(start(cmd, meta_path, log_path))
+        cmd_cfg: DmonCommandConfig = {
+            "cmd": " ".join(args.command_list) if args.shell else args.command_list,
+            "env": {},
+            "meta_path": args.meta_file or META_PATH_TEMPLATE.format(name=args.name),
+            "log_path": args.log_file or LOG_PATH_TEMPLATE.format(name=args.name),
+        }
+        sys.exit(start(cmd_cfg))
     else:
         parser.print_help()
         sys.exit(1)

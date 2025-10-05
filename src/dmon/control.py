@@ -8,7 +8,7 @@ from typing import Optional
 import psutil
 
 from .constants import DEFAULT_META_DIR, META_SUFFIX
-from .types import CmdType, DmonMeta, PathType
+from .types import DmonCommandConfig, DmonMeta, PathType
 
 
 def ensure_meta_dir(meta_path: Path):
@@ -39,13 +39,9 @@ def dump_meta(meta: DmonMeta, meta_path: Path):
     meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False))
 
 
-def start(
-    cmd: CmdType,
-    meta_path: PathType,
-    log_path: PathType,
-):
-    meta_path = Path(meta_path).resolve()
-    log_path = Path(log_path).resolve()
+def start(cfg: DmonCommandConfig):
+    meta_path = Path(cfg["meta_path"]).resolve()
+    log_path = Path(cfg["log_path"]).resolve()
     if meta_path.exists():
         print(f"Meta file already exists: {meta_path} (maybe still running?)")
         print("Run 'dmon status' to check or 'dmon stop' to stop it.")
@@ -56,7 +52,7 @@ def start(
 
     # Parameters to run the process in background detached from parent
     kwargs = {}
-    if isinstance(cmd, str):
+    if isinstance(cfg["cmd"], str):
         kwargs["shell"] = True
     if sys.platform.startswith("win"):
         DETACHED_PROCESS = 0x00000008
@@ -68,7 +64,7 @@ def start(
     # Open the log file (append mode)
     with open(log_path, "a") as lof:
         # Start the child process with stdout/stderr redirected to the log
-        proc = subprocess.Popen(cmd, stdout=lof, stderr=lof, **kwargs)
+        proc = subprocess.Popen(cfg["cmd"], stdout=lof, stderr=lof, **kwargs)
         start_time = time.time()
         start_time_human = time.strftime(
             "%Y-%m-%d %H:%M:%S", time.localtime(start_time)
@@ -79,7 +75,8 @@ def start(
             "pid": proc.pid,
             "meta_path": str(meta_path),
             "log_path": str(log_path),
-            "cmd": cmd,
+            "cmd": cfg["cmd"],
+            "env": cfg["env"],
             "popen_kwargs": kwargs,
             "start_time": start_time,
             "start_time_human": start_time_human,
@@ -147,13 +144,11 @@ def stop(
 
 
 def restart(
-    cmd: CmdType,
-    meta_path: PathType,
-    log_path: PathType,
+    cfg: DmonCommandConfig,
     timeout=5.0,
 ):
-    stop(meta_path, timeout)
-    return start(cmd, meta_path, log_path)
+    stop(cfg["meta_path"], timeout)
+    return start(cfg)
 
 
 def status(meta_path: PathType):
