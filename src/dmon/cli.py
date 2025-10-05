@@ -1,5 +1,4 @@
 import argparse
-from pathlib import Path
 import sys
 
 from .config import get_command_config
@@ -28,12 +27,10 @@ def main():
     )
     sp_start.add_argument(
         "--meta-file",
-        type=Path,
         help=f"Path to meta file (default: {META_PATH_TEMPLATE})",
     )
     sp_start.add_argument(
         "--log-file",
-        type=Path,
         help=f"Path to log file (default: command configured or {LOG_PATH_TEMPLATE})",
     )
 
@@ -48,7 +45,7 @@ def main():
         help="Configured command name (default: the only command if there's just one)",
         nargs="?",
     )
-    sp_stop.add_argument("--meta-file", type=Path, help="Path to meta file")
+    sp_stop.add_argument("--meta-file", help="Path to meta file")
 
     # restart subcommand
     sp_restart = subparsers.add_parser(
@@ -63,12 +60,10 @@ def main():
     )
     sp_restart.add_argument(
         "--meta-file",
-        type=Path,
         help=f"Path to meta file (default: {META_PATH_TEMPLATE})",
     )
     sp_restart.add_argument(
         "--log-file",
-        type=Path,
         help=f"Path to log file (default: command configured or {LOG_PATH_TEMPLATE})",
     )
 
@@ -85,7 +80,6 @@ def main():
     )
     sp_status.add_argument(
         "--meta-file",
-        type=Path,
         help=f"Path to meta file (default: {META_PATH_TEMPLATE})",
     )
 
@@ -97,7 +91,6 @@ def main():
     )
     sp_list.add_argument(
         "dir",
-        type=Path,
         help=f"Directory to look for meta files (default: {DEFAULT_META_DIR})",
         nargs="?",
     )
@@ -121,10 +114,10 @@ def main():
         else:
             sys.exit(restart(cmd_cfg["cmd"], meta_path, log_path))
     elif args.command in ["stop", "status"]:
-        if args.meta_file is not None:
+        if args.meta_file:
             meta_path = args.meta_file
         else:
-            if args.name is not None:
+            if args.name:
                 name = args.name
             else:
                 try:

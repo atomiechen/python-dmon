@@ -41,10 +41,8 @@ def get_command_config(name: Optional[str] = None):
     Get the command configuration for the given command name from [tool.dmon.commands].
     Validate the structure and return a DmonCommand dictionary.
 
-    If name is None and there is only one command, return that command.
-    If name is None and there are multiple commands, raise ValueError.
-    If the command is not found, raise ValueError.
-    If the command structure is invalid, raise TypeError or ValueError.
+    If name is None or empty, and there is only one command, return that command; otherwise, raise ValueError.
+    If the command is not found, or required fields are missing, raise TypeError or ValueError.
     """
     cfg, path = load_pyproject_toml()
     commands = cfg.get("tool", {}).get("dmon", {}).get("commands", {})
@@ -52,7 +50,7 @@ def get_command_config(name: Optional[str] = None):
     if not isinstance(commands, dict):
         raise TypeError("[tool.dmon.commands] must be a table (not [[array]])")
 
-    if name is None:
+    if not name:
         if len(commands) == 0:
             raise ValueError(f"No command found in {path}")
         elif len(commands) == 1:
@@ -78,5 +76,5 @@ def get_command_config(name: Optional[str] = None):
             f"Command '{name}' must be a string, list of strings, or a table"
         )
     elif "cmd" not in command or not isinstance(command["cmd"], str):
-        raise ValueError(f"Command '{name}' must have a 'cmd' string field")
+        raise TypeError(f"Command '{name}' must have a 'cmd' string field")
     return name, cast(DmonCommandConfig, command)
