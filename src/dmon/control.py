@@ -157,7 +157,7 @@ def stop(
         return 1
 
     # check if it's the same process by comparing create_time
-    if not check_same_process(proc, meta['create_time']):
+    if not check_same_process(proc, meta["create_time"]):
         print(
             colored(
                 f"Warning: PID {pid} exists but create_time does not match (maybe reused by another process); removing stale meta file",
@@ -178,7 +178,9 @@ def stop(
         ret = proc.wait(timeout)
         print(
             colored(
-                f"Process {pid} exited with code {ret}; removing meta file", color="green", attrs=["bold"]
+                f"Process {pid} exited with code {ret}; removing meta file",
+                color="green",
+                attrs=["bold"],
             ),
             file=sys.stderr,
         )
@@ -202,7 +204,11 @@ def stop(
         try:
             proc.kill()
             print(
-                colored(f"Killed process {pid}; removing meta file", color="green", attrs=["bold"]),
+                colored(
+                    f"Killed process {pid}; removing meta file",
+                    color="green",
+                    attrs=["bold"],
+                ),
                 file=sys.stderr,
             )
         except Exception as e:

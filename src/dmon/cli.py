@@ -27,7 +27,8 @@ def main():
     # start subcommand
     sp_start = subparsers.add_parser(
         "start",
-        help="Start a background command",
+        help="Start a configured command as a background process",
+        description="Start a configured command as a background process",
         # formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     sp_start.add_argument(
@@ -47,7 +48,8 @@ def main():
     # stop subcommand
     sp_stop = subparsers.add_parser(
         "stop",
-        help="Stop background process",
+        help="Stop a background process",
+        description="Stop a background process given name or meta file",
         # formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     sp_stop.add_argument(
@@ -60,7 +62,8 @@ def main():
     # restart subcommand
     sp_restart = subparsers.add_parser(
         "restart",
-        help="Restart background command",
+        help="Restart a configured command as a background process",
+        description="Restart a configured command as a background process",
         # formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     sp_restart.add_argument(
@@ -81,6 +84,7 @@ def main():
     sp_status = subparsers.add_parser(
         "status",
         help="Check process status",
+        description="Check status of a background process given name or meta file",
         # formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     sp_status.add_argument(
@@ -96,7 +100,8 @@ def main():
     # list subcommand
     sp_list = subparsers.add_parser(
         "list",
-        help="List all running processes",
+        help="List all processes and their status",
+        description="List all processes and their status managed by dmon in the given directory",
         # formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     sp_list.add_argument(
@@ -108,7 +113,8 @@ def main():
     # run subcommand
     sp_run = subparsers.add_parser(
         "run",
-        help="Run a custom command (not in config) as a daemon",
+        help="Run a custom command (not in config) as a background process",
+        description="Run a custom command (not in config) as a background process",
         # formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     sp_run.add_argument(
