@@ -69,16 +69,17 @@ def start(cfg: DmonCommandConfig):
         # Make the child process independent of the parent process in Unix-like systems
         kwargs["start_new_session"] = True
 
+    env = None  # default behavior of Popen
+    if cfg["override_env"]:
+        env = cfg["env"]
+    elif cfg["cwd"]:
+        env = {**os.environ, **cfg["env"]}
+
     # Open the log file (append mode)
     with open(log_path, "a") as lof:
         # Start the child process with stdout/stderr redirected to the log
-        if cfg["override_env"]:
-            full_env = cfg["env"]
-        else:
-            full_env = os.environ.copy()
-            full_env.update(cfg["env"])
         proc = subprocess.Popen(
-            cfg["cmd"], stdout=lof, stderr=lof, env=full_env, **kwargs
+            cfg["cmd"], stdout=lof, stderr=lof, env=env, **kwargs
         )
         try:
             p = psutil.Process(proc.pid)
