@@ -1,6 +1,8 @@
 import argparse
 import sys
 
+from colorama import just_fix_windows_console
+
 from .config import check_name_in_config, get_command_config
 from .control import list_processes, restart, start, stop, status
 from .constants import (
@@ -13,6 +15,8 @@ from .types import DmonCommandConfig
 
 
 def main():
+    just_fix_windows_console()
+
     parser = argparse.ArgumentParser(
         prog="dmon",
         description="Minimal cross-platform daemon manager",

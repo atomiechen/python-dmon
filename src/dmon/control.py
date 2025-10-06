@@ -7,8 +7,9 @@ import time
 from typing import Optional
 
 import psutil
+from termcolor import colored
 
-from .constants import DEFAULT_META_DIR, META_SUFFIX
+from .constants import ANSI_RE, DEFAULT_META_DIR, META_SUFFIX
 from .types import DmonCommandConfig, DmonMeta, PathType
 
 
@@ -51,8 +52,13 @@ def start(cfg: DmonCommandConfig):
         ret_meta = None
     if ret_meta:
         print(
-            f"Meta file already exists (name: '{ret_meta['name']}'): {meta_path} (maybe still running?)\n"
-            "Run 'dmon status' / 'dmon list' to check, or 'dmon stop' to stop it."
+            f"{colored('Start failed: meta file already exists', color='red', attrs=['bold'])}",
+            file=sys.stderr,
+        )
+        print_status(ret_meta)
+        print(
+            "\nRun 'dmon status' / 'dmon list' to check, or 'dmon stop' to stop it.",
+            file=sys.stderr,
         )
         return 1
 
@@ -123,14 +129,29 @@ def stop(
     meta_path = Path(meta_path).resolve()
     meta = load_meta(meta_path)
     if meta is None:
-        print(f"Meta file not found: {meta_path} (maybe not started?)")
+        print(
+            colored(
+                "Stop failed: meta file not found (maybe not started?)\n",
+                color="red",
+                attrs=["bold"],
+            )
+            + str(meta_path),
+            file=sys.stderr,
+        )
         return 1
 
     pid = meta["pid"]
     try:
         proc = psutil.Process(pid)
     except psutil.NoSuchProcess:
-        print(f"Process {pid} not found (already dead)")
+        print(
+            colored(
+                f"Process {pid} not found (already exited)",
+                color="yellow",
+                attrs=["bold"],
+            ),
+            file=sys.stderr,
+        )
         meta_path.unlink(missing_ok=True)
         print_status(meta)
         return 1
@@ -141,9 +162,21 @@ def stop(
     # wait for the process to exit or timeout
     try:
         ret = proc.wait(timeout)
-        print(f"Process {pid} exited with code {ret}")
+        print(
+            colored(
+                f"Process {pid} exited with code {ret}", color="green", attrs=["bold"]
+            ),
+            file=sys.stderr,
+        )
     except psutil.TimeoutExpired:
-        print(f"Process {pid} did not exit in time with code; killing it")
+        print(
+            colored(
+                f"Process {pid} did not exit in time; killing it",
+                color="yellow",
+                attrs=["bold"],
+            ),
+            file=sys.stderr,
+        )
 
         # first kill child processes
         for child in proc.children(recursive=True):
@@ -154,9 +187,17 @@ def stop(
         # then kill the parent process
         try:
             proc.kill()
-            print(f"Stopped process {pid}")
+            print(
+                colored(f"Killed process {pid}", color="green", attrs=["bold"]),
+                file=sys.stderr,
+            )
         except Exception as e:
-            print(f"Failed to kill process {pid}: {e}")
+            print(
+                colored(
+                    f"Failed to kill process {pid}: {e}", color="red", attrs=["bold"]
+                ),
+                file=sys.stderr,
+            )
 
     # remove the PID file
     try:
@@ -174,7 +215,7 @@ def restart(
     timeout=5.0,
 ):
     stop(cfg["meta_path"], timeout)
-    print("--- Restarting ---")
+    print("--- Restarting ---", file=sys.stderr)
     return start(cfg)
 
 
@@ -182,7 +223,15 @@ def status(meta_path: PathType):
     meta_path = Path(meta_path).resolve()
     meta = load_meta(meta_path)
     if meta is None:
-        print(f"Meta file not found: {meta_path} (maybe not started?)")
+        print(
+            colored(
+                "Status failed: meta file not found (maybe not started?)\n",
+                color="red",
+                attrs=["bold"],
+            )
+            + str(meta_path),
+            file=sys.stderr,
+        )
         return 1
 
     print_status(meta)
@@ -204,18 +253,32 @@ def check_running(pid: int, create_time: float) -> bool:
 
 
 def print_status(meta: DmonMeta):
-    pid = meta["pid"]
-    status = "Running" if check_running(pid, meta["create_time"]) else "Exited"
-    print(
-        f"NAME: {meta['name']}\n"
-        f"PID: {pid}\n"
-        f"STATUS: {status}\n"
-        f"CMD: {meta['cmd']}\n"
-        f"WORKING DIR: {meta['cwd']}\n"
-        f"CREATE TIME: {meta['create_time_human']}\n"
-        f"LOG PATH: {meta['log_path']}\n"
-        f"META PATH: {meta['meta_path']}"
+    status = (
+        colored("Running", on_color="on_green")
+        if check_running(meta["pid"], meta["create_time"])
+        else colored("Exited", on_color="on_light_red")
     )
+
+    # key-value pairs with aligned keys
+    rows = [
+        ("NAME", colored(meta["name"], "cyan", attrs=["bold"])),
+        ("PID", colored(str(meta["pid"]), "cyan", attrs=["bold"])),
+        ("STATUS", status),
+        ("CMD", meta["cmd"]),
+        ("WORKING DIR", meta["cwd"]),
+        ("CREATE TIME", meta["create_time_human"]),
+        ("LOG PATH", meta["log_path"]),
+        ("META PATH", meta["meta_path"]),
+    ]
+
+    # calculate the max width of the keys
+    key_width = max(len(key) for key, _ in rows)
+    # align the keys and print
+    lines = [
+        f"{colored(f'{key:<{key_width}}: ', attrs=['dark'])}{value}"
+        for key, value in rows
+    ]
+    print("\n".join(lines), file=sys.stderr)
 
 
 def list_processes(dir: PathType):
@@ -227,13 +290,16 @@ def list_processes(dir: PathType):
             name = meta_file.stem.rsplit(".", 2)[0]
             meta = load_meta(meta_file)
             if meta is not None:
+                status = (
+                    colored("Running", on_color="on_green")
+                    if check_running(meta["pid"], meta["create_time"])
+                    else colored("Exited", on_color="on_light_red")
+                )
                 metas.append(
                     (
-                        name,
-                        meta["pid"],
-                        "Running"
-                        if check_running(meta["pid"], meta["create_time"])
-                        else "Exited",
+                        colored(name, "cyan", attrs=["bold"]),
+                        colored(meta["pid"], "cyan", attrs=["bold"]),
+                        status,
                         meta["cmd"],
                         meta["create_time_human"],
                         meta["log_path"],
@@ -241,16 +307,21 @@ def list_processes(dir: PathType):
                 )
     metas.sort()
 
-    print(f"Found {len(metas)} process(es) in {target_dmon_dir}:")
+    lines = []
+    lines.append(f"Found {len(metas)} process(es) in {target_dmon_dir}:")
 
     # insert table header
     metas.insert(0, headers)
 
     # calculate column widths
-    widths = [max(len(str(row[i])) for row in metas) for i in range(len(headers))]
+    widths = [
+        max(len(ANSI_RE.sub("", str(row[i]))) for row in metas)
+        for i in range(len(headers))
+    ]
 
     # print the table with proper padding
     for row in metas:
         line = "  ".join(f"{str(cell):<{widths[i]}}" for i, cell in enumerate(row))
-        print(line)
+        lines.append(line)
+    print("\n".join(lines), file=sys.stderr)
     return 0
