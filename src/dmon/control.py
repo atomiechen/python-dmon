@@ -131,7 +131,7 @@ def stop(
     if meta is None:
         print(
             colored(
-                "Stop failed: meta file not found (maybe not started?)\n",
+                "Stop failed: meta file not found (maybe not started)\n",
                 color="red",
                 attrs=["bold"],
             )
@@ -146,7 +146,21 @@ def stop(
     except psutil.NoSuchProcess:
         print(
             colored(
-                f"Process {pid} not found (already exited)",
+                f"Process {pid} not found (already exited); removing stale meta file",
+                color="yellow",
+                attrs=["bold"],
+            ),
+            file=sys.stderr,
+        )
+        meta_path.unlink(missing_ok=True)
+        print_status(meta)
+        return 1
+
+    # check if it's the same process by comparing create_time
+    if not check_same_process(proc, meta['create_time']):
+        print(
+            colored(
+                f"Warning: PID {pid} exists but create_time does not match (maybe reused by another process); removing stale meta file",
                 color="yellow",
                 attrs=["bold"],
             ),
@@ -164,7 +178,7 @@ def stop(
         ret = proc.wait(timeout)
         print(
             colored(
-                f"Process {pid} exited with code {ret}", color="green", attrs=["bold"]
+                f"Process {pid} exited with code {ret}; removing meta file", color="green", attrs=["bold"]
             ),
             file=sys.stderr,
         )
@@ -188,7 +202,7 @@ def stop(
         try:
             proc.kill()
             print(
-                colored(f"Killed process {pid}", color="green", attrs=["bold"]),
+                colored(f"Killed process {pid}; removing meta file", color="green", attrs=["bold"]),
                 file=sys.stderr,
             )
         except Exception as e:
@@ -198,6 +212,8 @@ def stop(
                 ),
                 file=sys.stderr,
             )
+            print_status(meta)
+            return 1
 
     # remove the PID file
     try:
@@ -225,7 +241,7 @@ def status(meta_path: PathType):
     if meta is None:
         print(
             colored(
-                "Status failed: meta file not found (maybe not started?)\n",
+                "Status failed: meta file not found (maybe not started)\n",
                 color="red",
                 attrs=["bold"],
             )
@@ -236,6 +252,12 @@ def status(meta_path: PathType):
 
     print_status(meta)
     return 0
+
+
+def check_same_process(proc: psutil.Process, create_time: float) -> bool:
+    if create_time < 0:
+        return False
+    return abs(proc.create_time() - create_time) < 1e-3
 
 
 def check_running(pid: int, create_time: float) -> bool:
