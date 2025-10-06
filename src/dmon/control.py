@@ -69,7 +69,7 @@ def start(cfg: DmonCommandConfig):
     env = None  # default behavior of Popen
     if cfg["override_env"]:
         env = cfg["env"]
-    elif cfg["cwd"]:
+    elif cfg["env"]:
         env = {**os.environ, **cfg["env"]}
 
     shell = isinstance(cfg["cmd"], str)
