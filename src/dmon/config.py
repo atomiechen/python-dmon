@@ -10,10 +10,10 @@ else:
 from .types import CmdType, DmonCommandConfig
 
 
-def find_pyproject_toml(start: Optional[Path] = None) -> Path:
+def find_pyproject_toml(start: Optional[Path] = None):
     """
     Search for pyproject.toml from the current directory (or specified directory) upwards.
-    Return a Path object if found, otherwise raise FileNotFoundError.
+    Return a Path object if found.
     """
     start = start or Path.cwd()
     current = start.resolve()
@@ -23,17 +23,44 @@ def find_pyproject_toml(start: Optional[Path] = None) -> Path:
         if candidate.is_file():
             return candidate
 
-    raise FileNotFoundError(f"No pyproject.toml found from {start} upwards.")
+    # raise FileNotFoundError(f"No pyproject.toml found from {start} upwards.")
 
 
-def load_pyproject_toml():
-    pyproject_path = find_pyproject_toml()
-    if not pyproject_path.exists():
-        raise FileNotFoundError("pyproject.toml not found in current directory")
+def find_dmon_yaml(start: Optional[Path] = None):
+    """
+    Search for dmon.yaml / dmon.yml from the current directory (or specified directory) upwards.
+    Return a Path object if found.
+    """
+    start = start or Path.cwd()
+    current = start.resolve()
 
-    with open(pyproject_path, "rb") as f:
-        cfg = tomllib.load(f)
-    return cfg, pyproject_path
+    for parent in [current, *current.parents]:
+        for filename in ["dmon.yaml", "dmon.yml"]:
+            candidate = parent / filename
+            if candidate.is_file():
+                return candidate
+
+    # raise FileNotFoundError(f"No dmon.yaml or dmon.yml found from {start} upwards.")
+
+
+def load_config():
+    path = find_dmon_yaml()
+    if path:
+        import yaml
+
+        with path.open("r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f)
+    else:
+        path = find_pyproject_toml()
+        if not path:
+            raise FileNotFoundError(
+                "No dmon.yaml or pyproject.toml found in current or any parent directory."
+            )
+
+        with path.open("rb") as f:
+            cfg = tomllib.load(f)
+        cfg = cfg.get("tool", {}).get("dmon", {})
+    return cfg, path
 
 
 def validate_cmd_type(cmd, name: str) -> CmdType:
@@ -106,8 +133,8 @@ def get_command_config(name: Optional[str] = None):
     If name is None or empty, and there is only one command, return that command; otherwise, raise ValueError.
     If the command is not found, or required fields are missing, raise TypeError or ValueError.
     """
-    cfg, path = load_pyproject_toml()
-    commands = cfg.get("tool", {}).get("dmon", {}).get("commands", {})
+    cfg, path = load_config()
+    commands = cfg.get("commands", {})
 
     if not isinstance(commands, dict):
         raise TypeError("[tool.dmon.commands] must be a table (not [[array]])")
@@ -131,11 +158,11 @@ def get_command_config(name: Optional[str] = None):
 
 def check_name_in_config(name: str) -> bool:
     """
-    Check if the given command name exists in the [tool.dmon.commands] section of pyproject.toml.
+    Check if the given command name exists in the commands.
     Return True if found, False otherwise.
     """
-    cfg, _ = load_pyproject_toml()
-    commands = cfg.get("tool", {}).get("dmon", {}).get("commands", {})
+    cfg, _ = load_config()
+    commands = cfg.get("commands", {})
 
     if not isinstance(commands, dict):
         return False
