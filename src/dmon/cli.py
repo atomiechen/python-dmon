@@ -146,10 +146,11 @@ def main():
     args = parser.parse_args()
 
     if args.command in ["start", "restart"]:
+        sp = sp_start if args.command == "start" else sp_restart
         try:
             name, cmd_cfg = get_command_config(args.name)
         except Exception as e:
-            parser.error(str(e))
+            sp.error(str(e))
 
         cmd_cfg.meta_path = (
             args.meta_file or cmd_cfg.meta_path or META_PATH_TEMPLATE.format(name=name)
@@ -165,6 +166,7 @@ def main():
         else:
             sys.exit(restart(cmd_cfg))
     elif args.command in ["stop", "status"]:
+        sp = sp_stop if args.command == "stop" else sp_status
         if args.meta_file:
             meta_path = args.meta_file
         else:
@@ -174,7 +176,7 @@ def main():
                 try:
                     name, _ = get_command_config(args.name)
                 except Exception as e:
-                    parser.error(str(e))
+                    sp.error(str(e))
             meta_path = META_PATH_TEMPLATE.format(name=name)
         if args.command == "stop":
             sys.exit(stop(meta_path))
@@ -185,9 +187,9 @@ def main():
         sys.exit(list_processes(dir))
     elif args.command == "run":
         if not args.name:
-            parser.error("Please provide a non-empty name for the command.")
+            sp_run.error("Please provide a non-empty name for the command.")
         elif check_name_in_config(args.name):
-            parser.error(
+            sp_run.error(
                 f"Name '{args.name}' already exists in config. Please choose another name."
             )
 
