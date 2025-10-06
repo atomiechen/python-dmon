@@ -126,8 +126,8 @@ def start(cfg: DmonCommandConfig):
             **kwargs,
         )
     else:
-        # Open the log file (append mode)
-        with open(log_path, "a") as lof:
+        # Open the log file (append binary mode)
+        with open(log_path, "ab", buffering=0) as lof:
             # Start the child process with stdout/stderr redirected to the log
             proc = subprocess.Popen(
                 cfg.cmd,
@@ -136,6 +136,8 @@ def start(cfg: DmonCommandConfig):
                 cwd=cwd,
                 env=env,
                 shell=shell,
+                text=False,  # binary mode
+                bufsize=0,  # unbuffered
                 **kwargs,
             )
 
