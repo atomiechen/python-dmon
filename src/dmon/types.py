@@ -24,6 +24,7 @@ class DmonCommandConfig(TypedDict):
 
 class DmonMeta(DmonCommandConfig):
     pid: int
+    shell: bool
     popen_kwargs: Dict
     create_time: float
     create_time_human: str

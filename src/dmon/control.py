@@ -59,10 +59,16 @@ def start(cfg: DmonCommandConfig):
     ensure_meta_dir(meta_path)
     ensure_log_dir(log_path)
 
-    # Parameters to run the process in background detached from parent
+    env = None  # default behavior of Popen
+    if cfg["override_env"]:
+        env = cfg["env"]
+    elif cfg["cwd"]:
+        env = {**os.environ, **cfg["env"]}
+
+    shell = isinstance(cfg["cmd"], str)
+
+    # Platform-specific parameters to run the process in background detached from parent
     kwargs = {}
-    if isinstance(cfg["cmd"], str):
-        kwargs["shell"] = True
     if sys.platform.startswith("win"):
         DETACHED_PROCESS = 0x00000008
         kwargs["creationflags"] = DETACHED_PROCESS
@@ -70,17 +76,11 @@ def start(cfg: DmonCommandConfig):
         # Make the child process independent of the parent process in Unix-like systems
         kwargs["start_new_session"] = True
 
-    env = None  # default behavior of Popen
-    if cfg["override_env"]:
-        env = cfg["env"]
-    elif cfg["cwd"]:
-        env = {**os.environ, **cfg["env"]}
-
     # Open the log file (append mode)
     with open(log_path, "a") as lof:
         # Start the child process with stdout/stderr redirected to the log
         proc = subprocess.Popen(
-            cfg["cmd"], stdout=lof, stderr=lof, cwd=cwd, env=env, **kwargs
+            cfg["cmd"], stdout=lof, stderr=lof, cwd=cwd, env=env, shell=shell, **kwargs
         )
         try:
             p = psutil.Process(proc.pid)
@@ -102,6 +102,7 @@ def start(cfg: DmonCommandConfig):
         "cwd": str(cwd),
         "env": cfg["env"],
         "override_env": cfg["override_env"],
+        "shell": shell,
         "popen_kwargs": kwargs,
         "create_time": create_time,
         "create_time_human": create_time_human,
