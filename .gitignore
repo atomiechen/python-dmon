@@ -213,3 +213,5 @@ Thumbs.db
 *.log
 *.pid
 tmp*
+*.yaml
+*.yml
