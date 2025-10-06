@@ -78,26 +78,18 @@ def validate_cmd_type(cmd, name: str) -> CmdType:
 
 
 def validate_command(command, name: str) -> DmonCommandConfig:
-    ret: DmonCommandConfig = {
-        "name": name,
-        "cmd": "",
-        "cwd": "",
-        "env": {},
-        "override_env": False,
-        "log_path": "",
-        "meta_path": "",
-    }
+    ret = DmonCommandConfig(name=name)
     if isinstance(command, str) or isinstance(command, list):
-        ret["cmd"] = validate_cmd_type(command, name)
+        ret.cmd = validate_cmd_type(command, name)
     elif isinstance(command, dict):
         if "cmd" not in command:
             raise TypeError(f"Command '{name}' must have a 'cmd' field")
-        ret["cmd"] = validate_cmd_type(command["cmd"], name)
+        ret.cmd = validate_cmd_type(command["cmd"], name)
 
         if "cwd" in command:
             if not isinstance(command["cwd"], str):
                 raise TypeError(f"Command '{name}' 'cwd' field must be a string")
-            ret["cwd"] = command["cwd"]
+            ret.cwd = command["cwd"]
 
         if "env" in command:
             if not isinstance(command["env"], dict) or not all(
@@ -107,17 +99,58 @@ def validate_command(command, name: str) -> DmonCommandConfig:
                 raise TypeError(
                     f"Command '{name}' 'env' field must be a table of string to string"
                 )
-            ret["env"] = cast(Dict[str, str], command["env"])
+            ret.env = cast(Dict[str, str], command["env"])
+
+        if "override_env" in command:
+            if not isinstance(command["override_env"], bool):
+                raise TypeError(
+                    f"Command '{name}' 'override_env' field must be a boolean"
+                )
+            ret.override_env = command["override_env"]
 
         if "log_path" in command:
             if not isinstance(command["log_path"], str):
                 raise TypeError(f"Command '{name}' 'log_path' field must be a string")
-            ret["log_path"] = command["log_path"]
+            ret.log_path = command["log_path"]
+
+        if "log_rotate" in command:
+            if not isinstance(command["log_rotate"], bool):
+                raise TypeError(
+                    f"Command '{name}' 'log_rotate' field must be a boolean"
+                )
+            ret.log_rotate = command["log_rotate"]
+
+        if "log_max_size" in command:
+            if (
+                not isinstance(command["log_max_size"], int)
+                or command["log_max_size"] <= 0
+            ):
+                raise TypeError(
+                    f"Command '{name}' 'log_max_size' field must be a positive integer"
+                )
+            ret.log_max_size = command["log_max_size"]
+
+        if "rotate_log_path" in command:
+            if not isinstance(command["rotate_log_path"], str):
+                raise TypeError(
+                    f"Command '{name}' 'rotate_log_path' field must be a string"
+                )
+            ret.rotate_log_path = command["rotate_log_path"]
+
+        if "rotate_log_max_size" in command:
+            if (
+                not isinstance(command["rotate_log_max_size"], int)
+                or command["rotate_log_max_size"] <= 0
+            ):
+                raise TypeError(
+                    f"Command '{name}' 'rotate_log_max_size' field must be a positive integer"
+                )
+            ret.rotate_log_max_size = command["rotate_log_max_size"]
 
         if "meta_path" in command:
             if not isinstance(command["meta_path"], str):
                 raise TypeError(f"Command '{name}' 'meta_path' field must be a string")
-            ret["meta_path"] = command["meta_path"]
+            ret.meta_path = command["meta_path"]
     else:
         raise TypeError(
             f"Command '{name}' must be a string, list of strings, or a table; got {type(command)}"

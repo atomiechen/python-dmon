@@ -1,4 +1,5 @@
 import argparse
+import shlex
 import sys
 
 from colorama import just_fix_windows_console
@@ -10,6 +11,7 @@ from .constants import (
     DEFAULT_RUN_NAME,
     LOG_PATH_TEMPLATE,
     META_PATH_TEMPLATE,
+    ROTATE_LOG_PATH_TEMPLATE,
 )
 from .types import DmonCommandConfig
 
@@ -149,11 +151,14 @@ def main():
         except Exception as e:
             parser.error(str(e))
 
-        cmd_cfg["meta_path"] = args.meta_file or META_PATH_TEMPLATE.format(name=name)
-        cmd_cfg["log_path"] = (
-            args.log_file
-            or cmd_cfg.get("log_path")
-            or LOG_PATH_TEMPLATE.format(name=name)
+        cmd_cfg.meta_path = (
+            args.meta_file or cmd_cfg.meta_path or META_PATH_TEMPLATE.format(name=name)
+        )
+        cmd_cfg.log_path = (
+            args.log_file or cmd_cfg.log_path or LOG_PATH_TEMPLATE.format(name=name)
+        )
+        cmd_cfg.rotate_log_path = (
+            cmd_cfg.rotate_log_path or ROTATE_LOG_PATH_TEMPLATE.format(name=name)
         )
         if args.command == "start":
             sys.exit(start(cmd_cfg))
@@ -186,15 +191,13 @@ def main():
                 f"Name '{args.name}' already exists in config. Please choose another name."
             )
 
-        cmd_cfg: DmonCommandConfig = {
-            "name": args.name,
-            "cmd": " ".join(args.command_list) if args.shell else args.command_list,
-            "cwd": "",
-            "env": {},
-            "override_env": False,
-            "meta_path": args.meta_file or META_PATH_TEMPLATE.format(name=args.name),
-            "log_path": args.log_file or LOG_PATH_TEMPLATE.format(name=args.name),
-        }
+        cmd_cfg = DmonCommandConfig(
+            name=args.name,
+            cmd=shlex.join(args.command_list) if args.shell else args.command_list,
+            meta_path=args.meta_file or META_PATH_TEMPLATE.format(name=args.name),
+            log_path=args.log_file or LOG_PATH_TEMPLATE.format(name=args.name),
+            rotate_log_path=ROTATE_LOG_PATH_TEMPLATE.format(name=args.name),
+        )
         sys.exit(start(cmd_cfg))
     else:
         parser.print_help()

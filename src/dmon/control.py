@@ -1,10 +1,9 @@
-import json
 import os
 from pathlib import Path
+import shlex
 import sys
 import subprocess
 import time
-from typing import Optional
 
 import psutil
 from termcolor import colored
@@ -31,24 +30,13 @@ def ensure_log_dir(log_path: Path):
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
 
-def load_meta(meta_path: Path) -> Optional[DmonMeta]:
-    if meta_path.exists():
-        meta: DmonMeta = json.loads(meta_path.read_text())
-        return meta
-    return None
-
-
-def dump_meta(meta: DmonMeta, meta_path: Path):
-    meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False))
-
-
 def start(cfg: DmonCommandConfig):
-    meta_path = Path(cfg["meta_path"]).resolve()
-    log_path = Path(cfg["log_path"]).resolve()
-    cwd = Path(cfg["cwd"]).resolve()
+    meta_path = Path(cfg.meta_path).resolve()
+    log_path = Path(cfg.log_path).resolve()
+    cwd = Path(cfg.cwd).resolve()
 
     try:
-        ret_meta = load_meta(meta_path)
+        ret_meta = DmonMeta.load(meta_path)
     except Exception:
         ret_meta = None
     if ret_meta:
@@ -67,12 +55,12 @@ def start(cfg: DmonCommandConfig):
     ensure_log_dir(log_path)
 
     env = None  # default behavior of Popen
-    if cfg["override_env"]:
-        env = cfg["env"]
-    elif cfg["env"]:
-        env = {**os.environ, **cfg["env"]}
+    if cfg.override_env:
+        env = cfg.env
+    elif cfg.env:
+        env = {**os.environ, **cfg.env}
 
-    shell = isinstance(cfg["cmd"], str)
+    shell = isinstance(cfg.cmd, str)
 
     # Platform-specific parameters to run the process in background detached from parent
     kwargs = {}
@@ -83,41 +71,88 @@ def start(cfg: DmonCommandConfig):
         # Make the child process independent of the parent process in Unix-like systems
         kwargs["start_new_session"] = True
 
-    # Open the log file (append mode)
-    with open(log_path, "a") as lof:
-        # Start the child process with stdout/stderr redirected to the log
-        proc = subprocess.Popen(
-            cfg["cmd"], stdout=lof, stderr=lof, cwd=cwd, env=env, shell=shell, **kwargs
-        )
-        try:
-            p = psutil.Process(proc.pid)
-            create_time = p.create_time()
-            create_time_human = time.strftime(
-                "%Y-%m-%d %H:%M:%S", time.localtime(create_time)
-            )
-        except psutil.NoSuchProcess:
-            # process already exited?
-            create_time = -1
-            create_time_human = "N/A"
-
-    meta: DmonMeta = {
-        "name": cfg["name"],
-        "pid": proc.pid,
-        "meta_path": str(meta_path),
-        "log_path": str(log_path),
-        "cmd": cfg["cmd"],
-        "cwd": str(cwd),
-        "env": cfg["env"],
-        "override_env": cfg["override_env"],
-        "shell": shell,
-        "popen_kwargs": kwargs,
-        "create_time": create_time,
-        "create_time_human": create_time_human,
-    }
-    dump_meta(
-        meta,
-        meta_path,
+    meta = DmonMeta(
+        name=cfg.name,
+        meta_path=str(meta_path),
+        log_path=str(log_path),
+        log_rotate=cfg.log_rotate,
+        cmd=cfg.cmd,
+        cwd=str(cwd),
+        env=cfg.env,
+        override_env=cfg.override_env,
+        shell=shell,
+        popen_kwargs=kwargs,
     )
+
+    if cfg.log_rotate:
+        rotate_log_path = Path(cfg.rotate_log_path).resolve()
+
+        meta.rotate_log_path = str(rotate_log_path)
+        meta.log_max_size = cfg.log_max_size
+        meta.rotate_log_max_size = cfg.rotate_log_max_size
+
+        ensure_log_dir(rotate_log_path)
+
+        # use runner to start user process and handle log rotation
+        if isinstance(cfg.cmd, str):
+            # when cmd is str, we need to split it into list for subprocess
+            cmd = shlex.split(cfg.cmd)
+        else:
+            cmd = cfg.cmd
+        print(f"{sys.executable=} {cmd=}", file=sys.stderr)
+        args = [
+            sys.executable,
+            "-m",
+            "dmon.runner",
+            "--log-path",
+            str(log_path),
+            "--max-log-size",
+            str(cfg.log_max_size),
+            "--rotate-log-path",
+            str(rotate_log_path),
+            "--max-rotate-log-size",
+            str(cfg.rotate_log_max_size),
+        ]
+        if shell:
+            args.append("--shell")
+        args.append("--")
+        args.extend(cmd)
+        proc = subprocess.Popen(
+            args,
+            cwd=cwd,
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            **kwargs,
+        )
+    else:
+        # Open the log file (append mode)
+        with open(log_path, "a") as lof:
+            # Start the child process with stdout/stderr redirected to the log
+            proc = subprocess.Popen(
+                cfg.cmd,
+                stdout=lof,
+                stderr=lof,
+                cwd=cwd,
+                env=env,
+                shell=shell,
+                **kwargs,
+            )
+
+    meta.pid = proc.pid
+    try:
+        p = psutil.Process(proc.pid)
+        create_time = p.create_time()
+        create_time_human = time.strftime(
+            "%Y-%m-%d %H:%M:%S", time.localtime(create_time)
+        )
+        meta.create_time = create_time
+        meta.create_time_human = create_time_human
+    except psutil.NoSuchProcess:
+        # process already exited?
+        pass
+
+    meta.dump(meta_path)
 
     print_status(meta)
     return 0
@@ -128,7 +163,7 @@ def stop(
     timeout=5.0,
 ):
     meta_path = Path(meta_path).resolve()
-    meta = load_meta(meta_path)
+    meta = DmonMeta.load(meta_path)
     if meta is None:
         print(
             colored(
@@ -141,7 +176,7 @@ def stop(
         )
         return 1
 
-    pid = meta["pid"]
+    pid = meta.pid
     try:
         proc = psutil.Process(pid)
     except psutil.NoSuchProcess:
@@ -158,7 +193,7 @@ def stop(
         return 1
 
     # check if it's the same process by comparing create_time
-    if not check_same_process(proc, meta["create_time"]):
+    if not check_same_process(proc, meta.create_time):
         print(
             colored(
                 f"Warning: PID {pid} exists but create_time does not match (maybe reused by another process); removing stale meta file",
@@ -237,14 +272,14 @@ def restart(
     cfg: DmonCommandConfig,
     timeout=5.0,
 ):
-    stop(cfg["meta_path"], timeout)
+    stop(cfg.meta_path, timeout)
     print("--- Restarting ---", file=sys.stderr)
     return start(cfg)
 
 
 def status(meta_path: PathType):
     meta_path = Path(meta_path).resolve()
-    meta = load_meta(meta_path)
+    meta = DmonMeta.load(meta_path)
     if meta is None:
         print(
             colored(
@@ -284,21 +319,26 @@ def check_running(pid: int, create_time: float) -> bool:
 def print_status(meta: DmonMeta):
     status = (
         colored("Running", on_color="on_green")
-        if check_running(meta["pid"], meta["create_time"])
+        if check_running(meta.pid, meta.create_time)
         else colored("Exited", on_color="on_light_red")
     )
 
     # key-value pairs with aligned keys
     rows = [
-        ("NAME", colored(meta["name"], "cyan", attrs=["bold"])),
-        ("PID", colored(str(meta["pid"]), "cyan", attrs=["bold"])),
+        ("NAME", colored(meta.name, "cyan", attrs=["bold"])),
+        ("PID", colored(str(meta.pid), "cyan", attrs=["bold"])),
         ("STATUS", status),
-        ("CMD", meta["cmd"]),
-        ("WORKING DIR", meta["cwd"]),
-        ("CREATE TIME", meta["create_time_human"]),
-        ("LOG PATH", meta["log_path"]),
-        ("META PATH", meta["meta_path"]),
+        ("CMD", meta.cmd),
+        ("WORKING DIR", meta.cwd),
+        ("CREATE TIME", meta.create_time_human),
+        ("META PATH", meta.meta_path),
+        ("LOG ROTATE", meta.log_rotate),
+        ("LOG PATH", meta.log_path),
     ]
+    if meta.log_rotate:
+        rows.append(("ROTATE LOG PATH", meta.rotate_log_path))
+        rows.append(("LOG MAX SIZE", f"{meta.log_max_size} MB"))
+        rows.append(("ROTATE LOG MAX SIZE", f"{meta.rotate_log_max_size} MB"))
 
     # calculate the max width of the keys
     key_width = max(len(key) for key, _ in rows)
@@ -318,21 +358,21 @@ def list_processes(dir: PathType):
     if target_dmon_dir.exists() and target_dmon_dir.is_dir():
         for meta_file in target_dmon_dir.glob(f"*{META_SUFFIX}"):
             name = meta_file.stem.rsplit(".", 2)[0]
-            meta = load_meta(meta_file)
+            meta = DmonMeta.load(meta_file)
             if meta is not None:
                 status = (
                     colored("Running", on_color="on_green")
-                    if check_running(meta["pid"], meta["create_time"])
+                    if check_running(meta.pid, meta.create_time)
                     else colored("Exited", on_color="on_light_red")
                 )
                 metas.append(
                     (
                         colored(name, "cyan", attrs=["bold"]),
-                        colored(meta["pid"], "cyan", attrs=["bold"]),
+                        colored(meta.pid, "cyan", attrs=["bold"]),
                         status,
-                        meta["cmd"],
-                        meta["create_time_human"],
-                        meta["log_path"],
+                        meta.cmd,
+                        meta.create_time_human,
+                        meta.log_path,
                     )
                 )
     metas.sort()
