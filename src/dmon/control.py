@@ -99,7 +99,6 @@ def start(cfg: DmonCommandConfig):
             cmd = shlex.split(cfg.cmd)
         else:
             cmd = cfg.cmd
-        print(f"{sys.executable=} {cmd=}", file=sys.stderr)
         args = [
             sys.executable,
             "-m",
