@@ -43,9 +43,16 @@ def dump_meta(meta: DmonMeta, meta_path: Path):
 def start(cfg: DmonCommandConfig):
     meta_path = Path(cfg["meta_path"]).resolve()
     log_path = Path(cfg["log_path"]).resolve()
-    if meta_path.exists():
-        print(f"Meta file already exists: {meta_path} (maybe still running?)")
-        print("Run 'dmon status' to check or 'dmon stop' to stop it.")
+
+    try:
+        ret_meta = load_meta(meta_path)
+    except Exception:
+        ret_meta = None
+    if ret_meta:
+        print(
+            f"Meta file already exists (name: '{ret_meta['name']}'): {meta_path} (maybe still running?)\n"
+            "Run 'dmon status' / 'dmon list' to check, or 'dmon stop' to stop it."
+        )
         return 1
 
     ensure_meta_dir(meta_path)
