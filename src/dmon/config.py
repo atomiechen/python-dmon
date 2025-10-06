@@ -54,6 +54,7 @@ def validate_command(command, name: str) -> DmonCommandConfig:
     ret: DmonCommandConfig = {
         "name": name,
         "cmd": "",
+        "cwd": "",
         "env": {},
         "override_env": False,
         "log_path": "",
@@ -65,6 +66,11 @@ def validate_command(command, name: str) -> DmonCommandConfig:
         if "cmd" not in command:
             raise TypeError(f"Command '{name}' must have a 'cmd' field")
         ret["cmd"] = validate_cmd_type(command["cmd"], name)
+
+        if "cwd" in command:
+            if not isinstance(command["cwd"], str):
+                raise TypeError(f"Command '{name}' 'cwd' field must be a string")
+            ret["cwd"] = command["cwd"]
 
         if "env" in command:
             if not isinstance(command["env"], dict) or not all(

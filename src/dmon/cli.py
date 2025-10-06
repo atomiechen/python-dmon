@@ -179,6 +179,7 @@ def main():
         cmd_cfg: DmonCommandConfig = {
             "name": args.name,
             "cmd": " ".join(args.command_list) if args.shell else args.command_list,
+            "cwd": "",
             "env": {},
             "override_env": False,
             "meta_path": args.meta_file or META_PATH_TEMPLATE.format(name=args.name),

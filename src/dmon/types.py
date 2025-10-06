@@ -15,6 +15,7 @@ CmdType = Union[str, List[str]]
 class DmonCommandConfig(TypedDict):
     name: str
     cmd: CmdType
+    cwd: str
     env: Dict[str, str]
     override_env: bool
     meta_path: str

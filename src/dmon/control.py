@@ -43,6 +43,7 @@ def dump_meta(meta: DmonMeta, meta_path: Path):
 def start(cfg: DmonCommandConfig):
     meta_path = Path(cfg["meta_path"]).resolve()
     log_path = Path(cfg["log_path"]).resolve()
+    cwd = Path(cfg["cwd"]).resolve()
 
     try:
         ret_meta = load_meta(meta_path)
@@ -79,7 +80,7 @@ def start(cfg: DmonCommandConfig):
     with open(log_path, "a") as lof:
         # Start the child process with stdout/stderr redirected to the log
         proc = subprocess.Popen(
-            cfg["cmd"], stdout=lof, stderr=lof, env=env, **kwargs
+            cfg["cmd"], stdout=lof, stderr=lof, cwd=cwd, env=env, **kwargs
         )
         try:
             p = psutil.Process(proc.pid)
@@ -98,6 +99,7 @@ def start(cfg: DmonCommandConfig):
         "meta_path": str(meta_path),
         "log_path": str(log_path),
         "cmd": cfg["cmd"],
+        "cwd": str(cwd),
         "env": cfg["env"],
         "override_env": cfg["override_env"],
         "popen_kwargs": kwargs,
@@ -208,6 +210,7 @@ def print_status(meta: DmonMeta):
         f"PID: {pid}\n"
         f"STATUS: {status}\n"
         f"CMD: {meta['cmd']}\n"
+        f"WORKING DIR: {meta['cwd']}\n"
         f"CREATE TIME: {meta['create_time_human']}\n"
         f"LOG PATH: {meta['log_path']}\n"
         f"META PATH: {meta['meta_path']}"
