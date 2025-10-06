@@ -9,8 +9,9 @@ from typing import Optional
 import psutil
 from termcolor import colored
 
-from .constants import ANSI_RE, DEFAULT_META_DIR, META_SUFFIX
+from .constants import DEFAULT_META_DIR, META_SUFFIX
 from .types import DmonCommandConfig, DmonMeta, PathType
+from .utils import len_ansi, pad_ansi
 
 
 def ensure_meta_dir(meta_path: Path):
@@ -311,6 +312,7 @@ def print_status(meta: DmonMeta):
 
 def list_processes(dir: PathType):
     headers = ("NAME", "PID", "STATUS", "CMD", "CREATE TIME", "LOG PATH")
+    align = ("<", ">", "<", "<", "<", "<")
     metas = []
     target_dmon_dir = Path(dir).resolve()
     if target_dmon_dir.exists() and target_dmon_dir.is_dir():
@@ -342,14 +344,13 @@ def list_processes(dir: PathType):
     metas.insert(0, headers)
 
     # calculate column widths
-    widths = [
-        max(len(ANSI_RE.sub("", str(row[i]))) for row in metas)
-        for i in range(len(headers))
-    ]
+    widths = [max(len_ansi(str(row[i])) for row in metas) for i in range(len(headers))]
 
     # print the table with proper padding
     for row in metas:
-        line = "  ".join(f"{str(cell):<{widths[i]}}" for i, cell in enumerate(row))
+        line = "  ".join(
+            pad_ansi(str(cell), widths[i], align[i]) for i, cell in enumerate(row)
+        )
         lines.append(line)
     print("\n".join(lines), file=sys.stderr)
     return 0
