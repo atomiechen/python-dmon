@@ -1,3 +1,17 @@
+> [!WARNING]
+> This package has been renamed to `python-dmon` ([PyPI](https://pypi.org/project/python-dmon/) | [TestPyPI](https://test.pypi.org/project/python-dmon/)) and will **no longer be maintained**. 
+> Please update your installations accordingly.
+>
+> ```sh
+> pip uninstall dmon
+> pip install python-dmon
+> ```
+>
+> See [Github repository](https://github.com/atomiechen/python-dmon) for details.
+>
+> Below is the original README for reference.
+
+
 # dmon
 
 
