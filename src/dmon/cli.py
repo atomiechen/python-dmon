@@ -4,7 +4,7 @@ import sys
 
 from colorama import just_fix_windows_console
 
-from .config import check_name_in_config, get_command_config
+from .config import check_name_in_config, get_task_config
 from .control import list_processes, restart, start, stop, status
 from .constants import (
     DEFAULT_META_DIR,
@@ -13,7 +13,7 @@ from .constants import (
     META_PATH_TEMPLATE,
     ROTATE_LOG_PATH_TEMPLATE,
 )
-from .types import DmonCommandConfig
+from .types import DmonTaskConfig
 
 
 def main():
@@ -29,13 +29,13 @@ def main():
     # start subcommand
     sp_start = subparsers.add_parser(
         "start",
-        help="Start a configured command as a background process",
-        description="Start a configured command as a background process",
+        help="Start a configured task as a background process",
+        description="Start a configured task as a background process",
         # formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     sp_start.add_argument(
         "name",
-        help="Configured command name (default: the only command if there's just one)",
+        help="Configured task name (default: the only task if there's just one)",
         nargs="?",
     )
     sp_start.add_argument(
@@ -44,7 +44,7 @@ def main():
     )
     sp_start.add_argument(
         "--log-file",
-        help=f"Path to log file (default: command configured or {LOG_PATH_TEMPLATE})",
+        help=f"Path to log file (default: task configured or {LOG_PATH_TEMPLATE})",
     )
 
     # stop subcommand
@@ -56,7 +56,7 @@ def main():
     )
     sp_stop.add_argument(
         "name",
-        help="Configured command name (default: the only command if there's just one)",
+        help="Configured task name (default: the only task if there's just one)",
         nargs="?",
     )
     sp_stop.add_argument("--meta-file", help="Path to meta file")
@@ -64,13 +64,13 @@ def main():
     # restart subcommand
     sp_restart = subparsers.add_parser(
         "restart",
-        help="Restart a configured command as a background process",
-        description="Restart a configured command as a background process",
+        help="Restart a configured task as a background process",
+        description="Restart a configured task as a background process",
         # formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     sp_restart.add_argument(
         "name",
-        help="Configured command name (default: the only command if there's just one)",
+        help="Configured task name (default: the only task if there's just one)",
         nargs="?",
     )
     sp_restart.add_argument(
@@ -79,7 +79,7 @@ def main():
     )
     sp_restart.add_argument(
         "--log-file",
-        help=f"Path to log file (default: command configured or {LOG_PATH_TEMPLATE})",
+        help=f"Path to log file (default: task configured or {LOG_PATH_TEMPLATE})",
     )
 
     # status subcommand
@@ -91,7 +91,7 @@ def main():
     )
     sp_status.add_argument(
         "name",
-        help="Configured command name (default: the only command if there's just one)",
+        help="Configured task name (default: the only task if there's just one)",
         nargs="?",
     )
     sp_status.add_argument(
@@ -115,18 +115,18 @@ def main():
     # run subcommand
     sp_run = subparsers.add_parser(
         "run",
-        help="Run a custom command (not in config) as a background process",
-        description="Run a custom command (not in config) as a background process",
+        help="Run a custom task (not in config) as a background process",
+        description="Run a custom task (not in config) as a background process",
         # formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     sp_run.add_argument(
         "--name",
         "-n",
         default=DEFAULT_RUN_NAME,
-        help=f"Name for this command (default: {DEFAULT_RUN_NAME})",
+        help=f"Name for this task (default: {DEFAULT_RUN_NAME})",
     )
     sp_run.add_argument(
-        "--shell", action="store_true", help="Run command in shell (default: False)"
+        "--shell", action="store_true", help="Run task in shell (default: False)"
     )
     sp_run.add_argument(
         "--meta-file",
@@ -140,7 +140,7 @@ def main():
         "command_list",
         metavar="command",
         nargs=argparse.ONE_OR_MORE,
-        help="Command to run",
+        help="Command (with args) to run",
     )
 
     args = parser.parse_args()
@@ -148,7 +148,7 @@ def main():
     if args.command in ["start", "restart"]:
         sp = sp_start if args.command == "start" else sp_restart
         try:
-            name, cmd_cfg = get_command_config(args.name)
+            name, cmd_cfg = get_task_config(args.name)
         except Exception as e:
             sp.error(str(e))
 
@@ -174,7 +174,7 @@ def main():
                 name = args.name
             else:
                 try:
-                    name, _ = get_command_config(args.name)
+                    name, _ = get_task_config(args.name)
                 except Exception as e:
                     sp.error(str(e))
             meta_path = META_PATH_TEMPLATE.format(name=name)
@@ -187,13 +187,13 @@ def main():
         sys.exit(list_processes(dir))
     elif args.command == "run":
         if not args.name:
-            sp_run.error("Please provide a non-empty name for the command.")
+            sp_run.error("Please provide a non-empty name for the task.")
         elif check_name_in_config(args.name):
             sp_run.error(
                 f"Name '{args.name}' already exists in config. Please choose another name."
             )
 
-        cmd_cfg = DmonCommandConfig(
+        cmd_cfg = DmonTaskConfig(
             name=args.name,
             cmd=shlex.join(args.command_list) if args.shell else args.command_list,
             meta_path=args.meta_file or META_PATH_TEMPLATE.format(name=args.name),

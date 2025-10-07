@@ -16,9 +16,9 @@ CmdType = Union[str, List[str]]
 
 
 @dataclass
-class DmonCommandConfig:
+class DmonTaskConfig:
     name: str = ""
-    """Name of the command"""
+    """Name of the task"""
     cmd: CmdType = ""
     """Command to run, either a string (for shell) or a list of strings (for exec)"""
     cwd: str = ""
@@ -42,7 +42,7 @@ class DmonCommandConfig:
 
 
 @dataclass
-class DmonMeta(DmonCommandConfig):
+class DmonMeta(DmonTaskConfig):
     pid: int = -1
     shell: bool = False
     popen_kwargs: Dict = field(default_factory=dict)

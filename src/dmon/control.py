@@ -4,12 +4,13 @@ import shlex
 import sys
 import subprocess
 import time
+from typing import List
 
 import psutil
 from termcolor import colored
 
 from .constants import DEFAULT_META_DIR, META_SUFFIX
-from .types import DmonCommandConfig, DmonMeta, PathType
+from .types import DmonTaskConfig, DmonMeta, PathType
 from .utils import len_ansi, pad_ansi
 
 
@@ -30,7 +31,7 @@ def ensure_log_dir(log_path: Path):
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
 
-def start(cfg: DmonCommandConfig):
+def start(cfg: DmonTaskConfig):
     meta_path = Path(cfg.meta_path).resolve()
     log_path = Path(cfg.log_path).resolve()
     cwd = Path(cfg.cwd).resolve()
@@ -270,7 +271,7 @@ def stop(
 
 
 def restart(
-    cfg: DmonCommandConfig,
+    cfg: DmonTaskConfig,
     timeout=5.0,
 ):
     stop(cfg.meta_path, timeout)
@@ -294,6 +295,8 @@ def status(meta_path: PathType):
         return 1
 
     print_status(meta)
+    print("\nProcess Tree:", file=sys.stderr)
+    print_process_table([meta])
     return 0
 
 
@@ -301,6 +304,20 @@ def check_same_process(proc: psutil.Process, create_time: float) -> bool:
     if create_time < 0:
         return False
     return abs(proc.create_time() - create_time) < 1e-3
+
+
+def get_unique_process(pid: int, create_time: float):
+    """
+    Get the process with given PID and create_time if it is still the same process.
+    """
+    if create_time >= 0:
+        try:
+            p = psutil.Process(pid)
+            if check_same_process(p, create_time):
+                return p
+        except psutil.NoSuchProcess:
+            pass
+    return None
 
 
 def check_running(pid: int, create_time: float) -> bool:
@@ -326,7 +343,7 @@ def print_status(meta: DmonMeta):
 
     # key-value pairs with aligned keys
     rows = [
-        ("NAME", colored(meta.name, "cyan", attrs=["bold"])),
+        ("TASK", colored(meta.name, "cyan", attrs=["bold"])),
         ("PID", colored(str(meta.pid), "cyan", attrs=["bold"])),
         ("STATUS", status),
         ("CMD", meta.cmd),
@@ -351,47 +368,86 @@ def print_status(meta: DmonMeta):
     print("\n".join(lines), file=sys.stderr)
 
 
-def list_processes(dir: PathType):
-    headers = ("NAME", "PID", "STATUS", "CMD", "CREATE TIME", "LOG PATH")
-    align = ("<", ">", "<", "<", "<", "<")
-    metas = []
-    target_dmon_dir = Path(dir).resolve()
-    if target_dmon_dir.exists() and target_dmon_dir.is_dir():
-        for meta_file in target_dmon_dir.glob(f"*{META_SUFFIX}"):
-            name = meta_file.stem.rsplit(".", 2)[0]
-            meta = DmonMeta.load(meta_file)
-            if meta is not None:
-                status = (
-                    colored("Running", on_color="on_green")
-                    if check_running(meta.pid, meta.create_time)
-                    else colored("Exited", on_color="on_light_red")
-                )
-                metas.append(
-                    (
-                        colored(name, "cyan", attrs=["bold"]),
-                        colored(meta.pid, "cyan", attrs=["bold"]),
-                        status,
-                        meta.cmd,
-                        meta.create_time_human,
-                        meta.log_path,
-                    )
-                )
-    metas.sort()
+def get_table_row(p: psutil.Process, target_ppid: int, prefix=""):
+    ppid = p.ppid()
+    ppid_str = (
+        colored(str(ppid), "cyan", attrs=["bold"]) if ppid == target_ppid else str(ppid)
+    )
+    return (
+        prefix + p.name(),
+        p.pid,
+        ppid_str,
+        p.status(),
+        "...",
+        time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(p.create_time())),
+        "N/A",
+    )
 
-    lines = []
-    lines.append(f"Found {len(metas)} process(es) in {target_dmon_dir}:")
 
+def print_process_table(metas: List[DmonMeta]):
+    headers = ("TASK", "PID", "PPID", "STATUS", "CMD", "CREATE TIME", "LOG PATH")
+    align = ("<", ">", ">", "<", "<", "<", "<")
+    rows = []
+    tasks = 0
+    for meta in metas:
+        proc = get_unique_process(meta.pid, meta.create_time)
+        if proc:
+            status = colored("Running", on_color="on_green")
+            ppid = proc.ppid()
+        else:
+            status = colored("Exited", on_color="on_light_red")
+            ppid = "N/A"
+        rows.append(
+            (
+                colored(meta.name, "cyan", attrs=["bold"]),
+                colored(meta.pid, "cyan", attrs=["bold"]),
+                ppid,
+                status,
+                meta.cmd,
+                meta.create_time_human,
+                meta.log_path,
+            )
+        )
+        # add child processes indented
+        if proc:
+            children = proc.children(recursive=True)
+            for idx, child in enumerate(children):
+                prefix = "├ " if idx < len(children) - 1 else "└ "
+                rows.append(get_table_row(child, target_ppid=proc.pid, prefix=prefix))
+        tasks += 1
+
+    # return statistics
+    ret = (tasks, len(rows))
+
+    rows.sort()
     # insert table header
-    metas.insert(0, headers)
+    rows.insert(0, headers)
 
     # calculate column widths
-    widths = [max(len_ansi(str(row[i])) for row in metas) for i in range(len(headers))]
+    widths = [max(len_ansi(str(row[i])) for row in rows) for i in range(len(headers))]
 
     # print the table with proper padding
-    for row in metas:
+    lines = []
+    for row in rows:
         line = "  ".join(
             pad_ansi(str(cell), widths[i], align[i]) for i, cell in enumerate(row)
         )
         lines.append(line)
     print("\n".join(lines), file=sys.stderr)
+    return ret
+
+
+def list_processes(dir: PathType):
+    target_dmon_dir = Path(dir).resolve()
+    metas = []
+    if target_dmon_dir.exists() and target_dmon_dir.is_dir():
+        for meta_file in target_dmon_dir.glob(f"*{META_SUFFIX}"):
+            meta = DmonMeta.load(meta_file)
+            if meta is not None:
+                metas.append(meta)
+    tasks, processes = print_process_table(metas)
+    print(
+        f"\nFound {tasks} task{'s' if tasks > 1 else ''} ({processes} process{'es' if processes > 1 else ''}) in {target_dmon_dir}",
+        file=sys.stderr,
+    )
     return 0
