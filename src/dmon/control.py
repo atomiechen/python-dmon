@@ -121,7 +121,7 @@ def start(cfg: DmonCommandConfig):
             cwd=cwd,
             env=env,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
             **kwargs,
         )
     else:
@@ -131,7 +131,7 @@ def start(cfg: DmonCommandConfig):
             proc = subprocess.Popen(
                 cfg.cmd,
                 stdout=lof,
-                stderr=lof,
+                stderr=subprocess.STDOUT,
                 cwd=cwd,
                 env=env,
                 shell=shell,
