@@ -66,8 +66,9 @@ def start(cfg: DmonTaskConfig):
     # Platform-specific parameters to run the process in background detached from parent
     kwargs = {}
     if sys.platform.startswith("win"):
-        DETACHED_PROCESS = 0x00000008
-        kwargs["creationflags"] = DETACHED_PROCESS
+        # DETACHED_PROCESS = 0x00000008
+        CREATE_NO_WINDOW = 0x08000000
+        kwargs["creationflags"] = CREATE_NO_WINDOW
     else:
         # Make the child process independent of the parent process in Unix-like systems
         kwargs["start_new_session"] = True
