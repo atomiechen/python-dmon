@@ -14,6 +14,12 @@ dependencies = [
     "termcolor>=2.4.0",
     "tomli>=2.2.1 ; python_full_version < '3.11'",
 ]
+keywords = ["dmon", "daemon", "background", "detach", "process management"]
+
+[project.urls]
+"Homepage" = "https://github.com/atomiechen/dmon"
+"Bug Tracker" = "https://github.com/atomiechen/dmon/issues"
+Changelog = "https://github.com/atomiechen/dmon/blob/master/CHANGELOG.md"
 
 [project.scripts]
 dmon = "dmon.__main__:main"
