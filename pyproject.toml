@@ -19,7 +19,7 @@ keywords = ["python-dmon", "dmon", "daemon", "background", "detach", "process ma
 [project.urls]
 "Homepage" = "https://github.com/atomiechen/python-dmon"
 "Bug Tracker" = "https://github.com/atomiechen/python-dmon/issues"
-Changelog = "https://github.com/atomiechen/python-dmon/blob/master/CHANGELOG.md"
+Changelog = "https://github.com/atomiechen/python-dmon/blob/main/CHANGELOG.md"
 
 [project.scripts]
 dmon = "dmon.__main__:main"
