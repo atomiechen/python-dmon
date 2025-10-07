@@ -17,7 +17,7 @@ CmdType = Union[str, List[str]]
 
 @dataclass
 class DmonTaskConfig:
-    name: str = ""
+    task: str = ""
     """Name of the task"""
     cmd: CmdType = ""
     """Command to run, either a string (for shell) or a list of strings (for exec)"""

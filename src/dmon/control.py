@@ -78,7 +78,7 @@ def start(cfg: DmonTaskConfig):
         kwargs["start_new_session"] = True
 
     meta = DmonMeta(
-        name=cfg.name,
+        task=cfg.task,
         meta_path=str(meta_path),
         log_path=str(log_path),
         log_rotate=cfg.log_rotate,
@@ -416,7 +416,7 @@ def print_status(meta: DmonMeta):
 
     # key-value pairs with aligned keys
     rows = [
-        ("TASK", colored(meta.name, "cyan", attrs=["bold"])),
+        ("TASK", colored(meta.task, "cyan", attrs=["bold"])),
         ("PID", colored(str(meta.pid), "cyan", attrs=["bold"])),
         ("STATUS", status),
         ("CMD", meta.cmd),
@@ -477,7 +477,7 @@ def print_process_table(metas: List[DmonMeta], full_width: bool = False):
             ppid = "N/A"
         rows.append(
             (
-                colored(meta.name, "cyan", attrs=["bold"]),
+                colored(meta.task, "cyan", attrs=["bold"]),
                 colored(meta.pid, "cyan", attrs=["bold"]),
                 ppid,
                 status,

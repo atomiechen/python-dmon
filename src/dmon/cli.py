@@ -34,7 +34,7 @@ def main():
         # formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     sp_start.add_argument(
-        "name",
+        "task",
         help="Configured task name (default: the only task if there's just one)",
         nargs="?",
     )
@@ -55,7 +55,7 @@ def main():
         # formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     sp_stop.add_argument(
-        "name",
+        "task",
         help="Configured task name (default: the only task if there's just one)",
         nargs="?",
     )
@@ -69,7 +69,7 @@ def main():
         # formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     sp_restart.add_argument(
-        "name",
+        "task",
         help="Configured task name (default: the only task if there's just one)",
         nargs="?",
     )
@@ -90,7 +90,7 @@ def main():
         # formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     sp_status.add_argument(
-        "name",
+        "task",
         help="Configured task name (default: the only task if there's just one)",
         nargs="?",
     )
@@ -167,18 +167,18 @@ def main():
     if args.command in ["start", "restart"]:
         sp = sp_start if args.command == "start" else sp_restart
         try:
-            name, task_cfg = get_task_config(args.name)
+            task, task_cfg = get_task_config(args.task)
         except Exception as e:
             sp.error(str(e))
 
         task_cfg.meta_path = (
-            args.meta_file or task_cfg.meta_path or META_PATH_TEMPLATE.format(name=name)
+            args.meta_file or task_cfg.meta_path or META_PATH_TEMPLATE.format(task=task)
         )
         task_cfg.log_path = (
-            args.log_file or task_cfg.log_path or LOG_PATH_TEMPLATE.format(name=name)
+            args.log_file or task_cfg.log_path or LOG_PATH_TEMPLATE.format(task=task)
         )
         task_cfg.rotate_log_path = (
-            task_cfg.rotate_log_path or ROTATE_LOG_PATH_TEMPLATE.format(name=name)
+            task_cfg.rotate_log_path or ROTATE_LOG_PATH_TEMPLATE.format(task=task)
         )
         if args.command == "start":
             sys.exit(start(task_cfg))
@@ -189,14 +189,14 @@ def main():
         if args.meta_file:
             meta_path = args.meta_file
         else:
-            if args.name:
-                name = args.name
+            if args.task:
+                task = args.task
             else:
                 try:
-                    name, _ = get_task_config(args.name)
+                    task, _ = get_task_config(args.task)
                 except Exception as e:
                     sp.error(str(e))
-            meta_path = META_PATH_TEMPLATE.format(name=name)
+            meta_path = META_PATH_TEMPLATE.format(task=task)
         if args.command == "stop":
             sys.exit(stop(meta_path))
         else:
@@ -209,18 +209,18 @@ def main():
             sp_run.error("Please provide a non-empty name for the task.")
         elif check_name_in_config(args.name):
             sp_run.error(
-                f"Name '{args.name}' already exists in config. Please choose another name."
+                f"Task '{args.name}' already exists in config. Please choose another name."
             )
 
         task_cfg = DmonTaskConfig(
-            name=args.name,
+            task=args.name,
             cmd=shlex.join(args.command_list) if args.shell else args.command_list,
             cwd=args.cwd,
-            meta_path=args.meta_file or META_PATH_TEMPLATE.format(name=args.name),
-            log_path=args.log_file or LOG_PATH_TEMPLATE.format(name=args.name),
+            meta_path=args.meta_file or META_PATH_TEMPLATE.format(task=args.name),
+            log_path=args.log_file or LOG_PATH_TEMPLATE.format(task=args.name),
             log_rotate=args.log_rotate,
             rotate_log_path=args.rotate_log_path
-            or ROTATE_LOG_PATH_TEMPLATE.format(name=args.name),
+            or ROTATE_LOG_PATH_TEMPLATE.format(task=args.name),
         )
         sys.exit(start(task_cfg))
     else:

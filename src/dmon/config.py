@@ -78,7 +78,7 @@ def validate_cmd_type(cmd, name: str) -> CmdType:
 
 
 def validate_task(task, name: str) -> DmonTaskConfig:
-    ret = DmonTaskConfig(name=name)
+    ret = DmonTaskConfig(task=name)
     if isinstance(task, str) or isinstance(task, list):
         ret.cmd = validate_cmd_type(task, name)
     elif isinstance(task, dict):

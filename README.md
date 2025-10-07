@@ -118,17 +118,17 @@ tasks:
     env:  # (default: inherit from parent process)
       PYTHONUNBUFFERED: "1"
     override_env: false  # override parent env and only use env defined here
-    log_path: "logs/<name>.log" # path to log file
+    log_path: "logs/<task>.log" # path to log file
     log_rotate: false  # enable log rotation
     log_max_size: 5  # max log file size before rotation in MB
-    rotate_log_path: "logs/<name>.rotate.log"  # path to rotation log
+    rotate_log_path: "logs/<task>.rotate.log"  # path to rotation log
     rotate_log_max_size: 5  # max rotation log file size in MB
-    meta_path: ".dmon/<name>.meta.json"  # path to meta file
+    meta_path: ".dmon/<task>.meta.json"  # path to meta file
 ```
 
 ## Under the Hood
 
-Each task is associated with a meta file (e.g. `.dmon/<name>.meta.json`) stored in the current working directory.
+Each task is associated with a meta file (e.g. `.dmon/<task>.meta.json`) stored in the current working directory.
 The file contains details such as the command, PID, log path, and more.
 **Do not** modify or delete these files manually.
 
