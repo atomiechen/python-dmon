@@ -14,8 +14,11 @@ def pad_ansi(
 ) -> str:
     """Pad a string with ANSI escape codes to a given width."""
     real_len = len_ansi(s)
-    if real_len >= width:
+    if real_len == width:
         return s
+    if real_len > width:
+        return s[: width - 3] + "..."  # truncate and add ellipsis
+
     pad_len = width - real_len
     if align == "<":
         return s + fill * pad_len

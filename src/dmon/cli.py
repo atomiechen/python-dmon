@@ -111,6 +111,11 @@ def main():
         help=f"Directory to look for meta files (default: {DEFAULT_META_DIR})",
         nargs="?",
     )
+    sp_list.add_argument(
+        "--full",
+        action="store_true",
+        help="Show full width without truncating column (default: False)",
+    )
 
     # run subcommand
     sp_run = subparsers.add_parser(
@@ -198,7 +203,7 @@ def main():
             sys.exit(status(meta_path))
     elif args.command == "list":
         dir = args.dir or DEFAULT_META_DIR
-        sys.exit(list_processes(dir))
+        sys.exit(list_processes(dir, args.full))
     elif args.command == "run":
         if not args.name:
             sp_run.error("Please provide a non-empty name for the task.")

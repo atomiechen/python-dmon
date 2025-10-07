@@ -451,13 +451,13 @@ def get_table_row(p: psutil.Process, target_ppid: int, prefix=""):
         p.pid,
         ppid_str,
         p.status(),
-        "...",
+        p.cmdline(),
         time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(p.create_time())),
         "N/A",
     )
 
 
-def print_process_table(metas: List[DmonMeta]):
+def print_process_table(metas: List[DmonMeta], full_width: bool = False):
     headers = ("TASK", "PID", "PPID", "STATUS", "CMD", "CREATE TIME", "LOG PATH")
     align = ("<", ">", ">", "<", "<", "<", "<")
 
@@ -497,6 +497,13 @@ def print_process_table(metas: List[DmonMeta]):
     # calculate column widths
     widths = [max(len_ansi(str(row[i])) for row in rows) for i in range(len(headers))]
 
+    term_width = shutil.get_terminal_size().columns
+    diff = sum(widths) + 2 * (len(headers) - 1) - term_width
+    if diff > 0 and not full_width:
+        # truncate CMD column
+        cmd_idx = headers.index("CMD")
+        widths[cmd_idx] = max(widths[cmd_idx] - diff, 10)  # at least 10 chars
+
     # print the table with proper padding
     lines = []
     for row in rows:
@@ -515,7 +522,7 @@ def print_process_table(metas: List[DmonMeta]):
     return processes
 
 
-def list_processes(dir: PathType):
+def list_processes(dir: PathType, full_width: bool):
     target_dmon_dir = Path(dir).resolve()
     metas = []
     if target_dmon_dir.exists() and target_dmon_dir.is_dir():
@@ -526,7 +533,7 @@ def list_processes(dir: PathType):
     # sort by name (case-insensitive)
     metas.sort(key=lambda m: m.name.lower())
     n_task = len(metas)
-    processes = print_process_table(metas)
+    processes = print_process_table(metas, full_width)
     n_proc = len(processes)
     print(
         f"\nFound {n_task} task{'s' if n_task > 1 else ''} ({n_proc} process{'es' if n_proc > 1 else ''}) in {target_dmon_dir}",
