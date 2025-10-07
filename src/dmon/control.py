@@ -497,7 +497,13 @@ def print_process_table(metas: List[DmonMeta]):
     lines = []
     for row in rows:
         line = "  ".join(
-            pad_ansi(str(cell), widths[i], align[i]) for i, cell in enumerate(row)
+            # pad the cell except the last one if left-aligned (no need for extra spaces)
+            (
+                pad_ansi(str(cell), widths[i], align[i])
+                if i < len(align) - 1 or align[i] != "<"
+                else str(cell)
+            )
+            for i, cell in enumerate(row)
         )
         lines.append(line)
     print("\n".join(lines), file=sys.stderr)
