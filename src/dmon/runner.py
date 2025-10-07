@@ -8,7 +8,7 @@ import subprocess
 import sys
 
 
-logger = logging.getLogger("rotatelog")
+logger = logging.getLogger("dmon.runner")
 
 
 class FixedSizeRotatingFileHandler(RotatingFileHandler):
@@ -100,6 +100,21 @@ def main(
     rotate_log_path,
     max_rotate_log_size,
 ):
+    # Configure logging
+    rh = None
+    if rotate_log_path:
+        rh = FixedSizeRotatingFileHandler(rotate_log_path, maxBytes=max_rotate_log_size)
+    logging.basicConfig(
+        format="%(asctime)s.%(msecs)03d - %(process)d - %(levelname)s - %(message)s",
+        level=logging.INFO,
+        datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=[rh] if rh else None,
+    )
+
+    logger.info(
+        f"Prepare for rotating logs: {log_path=} {max_log_size=} {rotate_log_path=} {max_rotate_log_size=}"
+    )
+
     shell = isinstance(cmd, str)
     # Start the child process with stdout/stderr redirected to the log
     # env will be inherited from parent process
@@ -115,52 +130,41 @@ def main(
 
     # register signal handler to terminate the child process
     def signal_handler(signum, frame):
-        logger.info(f"Received signal {signum}, shutting down.")
+        logger.info(f"Received signal {signum}, forwarding to child process...")
         # proc.terminate()
         proc.send_signal(signum)
         logger.info("Waiting for child process to exit...")
         proc.wait()
-        logger.info("Child process exited, exiting.")
+        logger.info("Child process exited, all done.")
         sys.exit(0)
 
     # Set up signal handlers
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    # Configure logging
-    rh = None
-    if rotate_log_path:
-        rh = FixedSizeRotatingFileHandler(rotate_log_path, maxBytes=max_rotate_log_size)
-    logging.basicConfig(
-        format="%(asctime)s.%(msecs)03d - %(process)d - %(levelname)s - %(message)s",
-        level=logging.INFO,
-        datefmt="%Y-%m-%d %H:%M:%S",
-        handlers=[rh] if rh else None,
-    )
-    logger.info(
-        f"Start logging and rotating: {proc.pid=} {log_path=} {max_log_size=} {rotate_log_path=} {max_rotate_log_size=}"
-    )
+    logger.info(f"Started process {proc.pid} with command: {cmd} (shell={shell})")
 
     make_file_dir(log_path)
     loop_to_log(proc.stdout, log_path, max_log_size)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Log rotation utility")
+    parser = argparse.ArgumentParser(
+        description="Dmon task runner with log rotation utility",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
     parser.add_argument(
         "command",
         nargs=argparse.ONE_OR_MORE,
         help="Command with arguments to run",
     )
-    parser.add_argument(
-        "--shell", action="store_true", help="Run command in shell (default: False)"
-    )
+    parser.add_argument("--shell", action="store_true", help="Run command in shell")
     parser.add_argument("--log-path", help="Log file path", required=True)
     parser.add_argument(
         "--max-log-size",
         help="Max log file size (MB); 0 for no rotation",
         type=int,
-        required=True,
+        default=5,
     )
     parser.add_argument(
         "--rotate-log-path",
