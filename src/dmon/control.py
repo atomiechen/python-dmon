@@ -191,8 +191,8 @@ def stop(
             ),
             file=sys.stderr,
         )
-        meta_path.unlink(missing_ok=True)
         print_status(meta)
+        meta_path.unlink(missing_ok=True)
         return 1
 
     # check if it's the same process by comparing create_time
@@ -205,10 +205,21 @@ def stop(
             ),
             file=sys.stderr,
         )
-        meta_path.unlink(missing_ok=True)
         print_status(meta)
+        meta_path.unlink(missing_ok=True)
         return 1
 
+    if sys.platform.startswith("win"):
+        ret = terminate_win(proc, timeout)
+    else:
+        ret = terminate_posix(proc, timeout)
+    print_status(meta)
+    if ret == 0:
+        meta_path.unlink(missing_ok=True)
+    return ret
+
+
+def terminate_posix(proc: psutil.Process, timeout):
     # send SIGTERM first for graceful shutdown (if platform supports)
     proc.terminate()
 
@@ -217,7 +228,7 @@ def stop(
         ret = proc.wait(timeout)
         print(
             colored(
-                f"Process {pid} exited with code {ret}; removing meta file",
+                f"Process {proc.pid} exited with code {ret}; removing meta file",
                 color="green",
                 attrs=["bold"],
             ),
@@ -226,7 +237,7 @@ def stop(
     except psutil.TimeoutExpired:
         print(
             colored(
-                f"Process {pid} did not exit in time; killing it",
+                f"Process {proc.pid} did not exit in time; killing it",
                 color="yellow",
                 attrs=["bold"],
             ),
@@ -244,7 +255,7 @@ def stop(
             proc.kill()
             print(
                 colored(
-                    f"Killed process {pid}; removing meta file",
+                    f"Killed process {proc.pid}; removing meta file",
                     color="green",
                     attrs=["bold"],
                 ),
@@ -253,21 +264,54 @@ def stop(
         except Exception as e:
             print(
                 colored(
-                    f"Failed to kill process {pid}: {e}", color="red", attrs=["bold"]
+                    f"Failed to kill process {proc.pid}: {e}",
+                    color="red",
+                    attrs=["bold"],
                 ),
                 file=sys.stderr,
             )
-            print_status(meta)
             return 1
+    return 0
 
-    # remove the PID file
+
+def terminate_win(proc: psutil.Process, timeout):
+    # On Windows, we need to stop child processes first
+    children = proc.children(recursive=True)
+    # reverse to kill leaf nodes first
+    for child in reversed(children):
+        try:
+            child.kill()
+            child.wait(timeout=2)
+        except Exception:
+            pass
     try:
-        # os.remove(pid_file)
-        meta_path.unlink(missing_ok=True)
-    except OSError:
-        pass
-
-    print_status(meta)
+        ret = proc.wait(timeout=timeout)
+        print(
+            colored(
+                f"Process {proc.pid} exited with code {ret}; removing meta file",
+                color="green",
+                attrs=["bold"],
+            ),
+            file=sys.stderr,
+        )
+    except psutil.TimeoutExpired:
+        print(
+            colored(
+                f"Process {proc.pid} did not exit in time after killing children; killing it",
+                color="yellow",
+                attrs=["bold"],
+            ),
+            file=sys.stderr,
+        )
+        proc.kill()
+        print(
+            colored(
+                f"Killed process {proc.pid}; removing meta file",
+                color="green",
+                attrs=["bold"],
+            ),
+            file=sys.stderr,
+        )
     return 0
 
 
