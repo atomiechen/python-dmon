@@ -1,14 +1,15 @@
-# dmon
+# python-dmon
 
 
-[![GitHub](https://img.shields.io/badge/github-dmon-blue?logo=github)](https://github.com/atomiechen/dmon)
-[![PyPI](https://img.shields.io/pypi/v/dmon?logo=pypi&logoColor=white)](https://pypi.org/project/dmon/)
+[![GitHub](https://img.shields.io/badge/github-python--dmon-blue?logo=github)](https://github.com/atomiechen/python-dmon)
+[![PyPI](https://img.shields.io/pypi/v/python--dmon?logo=pypi&logoColor=white)](https://pypi.org/project/python-dmon/)
 
 
 A lightweight, cross-platform daemon manager that runs any command — called a *task* — as a background process. 
 It also supports logging and log rotation out of the box. 
 **No Docker or extra dependencies required**. 
 
+Shipped as the CLI tool `dmon`.
 It is a Python-based and more powerful successor to the [handy-backend shell scripts](https://github.com/atomiechen/handy-backend).
 
 
@@ -23,13 +24,13 @@ It is a Python-based and more powerful successor to the [handy-backend shell scr
 ## Installation
 
 ```sh
-pip install dmon
+pip install python-dmon
 ```
 
 To get the latest features, install from source:
 
 ```sh
-pip install git+https://github.com/atomiechen/dmon.git
+pip install git+https://github.com/atomiechen/python-dmon.git
 ```
 
 ## Getting Started
@@ -92,7 +93,7 @@ dmon run --cwd /path/to/script bash myscript.sh
 ```
 
 > [!NOTE]
-> If no name is provided, dmon automatically assigns a fixed task name `default_run` to prevent duplicate runs.
+> If no name is provided, `dmon` automatically assigns a fixed task name `default_run` to prevent duplicate runs.
 
 
 ### List all running tasks
@@ -134,4 +135,4 @@ The file contains details such as the command, PID, log path, and more.
 
 ## License
 
-[dmon](https://github.com/atomiechen/dmon) © 2025 by [Atomie CHEN](https://github.com/atomiechen) is licensed under the [MIT License](https://github.com/atomiechen/dmon/blob/main/LICENSE).
+[python-dmon](https://github.com/atomiechen/python-dmon) © 2025 by [Atomie CHEN](https://github.com/atomiechen) is licensed under the [MIT License](https://github.com/atomiechen/python-dmon/blob/main/LICENSE).
