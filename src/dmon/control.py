@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 import shlex
+import shutil
 import sys
 import subprocess
 import time
@@ -69,6 +70,9 @@ def start(cfg: DmonTaskConfig):
         # DETACHED_PROCESS = 0x00000008
         CREATE_NO_WINDOW = 0x08000000
         kwargs["creationflags"] = CREATE_NO_WINDOW
+        if isinstance(cfg.cmd, list) and len(cfg.cmd) > 0:
+            # On Windows, use full path for the executable when shell=False
+            cfg.cmd[0] = shutil.which(cfg.cmd[0]) or cfg.cmd[0]
     else:
         # Make the child process independent of the parent process in Unix-like systems
         kwargs["start_new_session"] = True
