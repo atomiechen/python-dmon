@@ -237,40 +237,64 @@ def terminate_posix(proc: psutil.Process, timeout):
     except psutil.TimeoutExpired:
         print(
             colored(
-                f"Process {proc.pid} did not exit in time; killing it",
+                f"Process {proc.pid} did not exit in time; shutting down child processes",
                 color="yellow",
                 attrs=["bold"],
             ),
             file=sys.stderr,
         )
 
-        # first kill child processes
-        for child in proc.children(recursive=True):
+        # first shut down child processes (leaf nodes first)
+        for child in reversed(proc.children(recursive=True)):
             try:
-                child.kill()
+                child.terminate()
+                child.wait(timeout=2)
             except Exception:
-                pass
-        # then kill the parent process
+                try:
+                    child.kill()
+                except Exception:
+                    pass
+        # then shut down the parent process
         try:
-            proc.kill()
+            # check if process is already exited
+            ret = proc.wait(timeout=2)
             print(
                 colored(
-                    f"Killed process {proc.pid}; removing meta file",
+                    f"Process {proc.pid} exited with code {ret} after terminating children; removing meta file",
                     color="green",
                     attrs=["bold"],
                 ),
                 file=sys.stderr,
             )
-        except Exception as e:
+        except psutil.TimeoutExpired:
             print(
                 colored(
-                    f"Failed to kill process {proc.pid}: {e}",
-                    color="red",
+                    f"Process {proc.pid} did not exit in time after terminating children; killing it",
+                    color="yellow",
                     attrs=["bold"],
                 ),
                 file=sys.stderr,
             )
-            return 1
+            try:
+                proc.kill()
+                print(
+                    colored(
+                        f"Killed process {proc.pid}; removing meta file",
+                        color="green",
+                        attrs=["bold"],
+                    ),
+                    file=sys.stderr,
+                )
+            except Exception as e:
+                print(
+                    colored(
+                        f"Failed to kill process {proc.pid}: {e}",
+                        color="red",
+                        attrs=["bold"],
+                    ),
+                    file=sys.stderr,
+                )
+                return 1
     return 0
 
 
