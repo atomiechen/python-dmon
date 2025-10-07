@@ -387,13 +387,18 @@ def get_table_row(p: psutil.Process, target_ppid: int, prefix=""):
 def print_process_table(metas: List[DmonMeta]):
     headers = ("TASK", "PID", "PPID", "STATUS", "CMD", "CREATE TIME", "LOG PATH")
     align = ("<", ">", ">", "<", "<", "<", "<")
+
+    # add table header
     rows = []
-    tasks = 0
+    rows.append(headers)
+
+    processes = []
     for meta in metas:
         proc = get_unique_process(meta.pid, meta.create_time)
         if proc:
             status = colored("Running", on_color="on_green")
             ppid = proc.ppid()
+            processes.append(proc)
         else:
             status = colored("Exited", on_color="on_light_red")
             ppid = "N/A"
@@ -414,14 +419,7 @@ def print_process_table(metas: List[DmonMeta]):
             for idx, child in enumerate(children):
                 prefix = "├ " if idx < len(children) - 1 else "└ "
                 rows.append(get_table_row(child, target_ppid=proc.pid, prefix=prefix))
-        tasks += 1
-
-    # return statistics
-    ret = (tasks, len(rows))
-
-    rows.sort()
-    # insert table header
-    rows.insert(0, headers)
+                processes.append(child)
 
     # calculate column widths
     widths = [max(len_ansi(str(row[i])) for row in rows) for i in range(len(headers))]
@@ -434,7 +432,8 @@ def print_process_table(metas: List[DmonMeta]):
         )
         lines.append(line)
     print("\n".join(lines), file=sys.stderr)
-    return ret
+
+    return processes
 
 
 def list_processes(dir: PathType):
@@ -445,9 +444,13 @@ def list_processes(dir: PathType):
             meta = DmonMeta.load(meta_file)
             if meta is not None:
                 metas.append(meta)
-    tasks, processes = print_process_table(metas)
+    # sort by name (case-insensitive)
+    metas.sort(key=lambda m: m.name.lower())
+    n_task = len(metas)
+    processes = print_process_table(metas)
+    n_proc = len(processes)
     print(
-        f"\nFound {tasks} task{'s' if tasks > 1 else ''} ({processes} process{'es' if processes > 1 else ''}) in {target_dmon_dir}",
+        f"\nFound {n_task} task{'s' if n_task > 1 else ''} ({n_proc} process{'es' if n_proc > 1 else ''}) in {target_dmon_dir}",
         file=sys.stderr,
     )
     return 0
