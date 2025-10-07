@@ -126,6 +126,11 @@ def main():
         help=f"Name for this task (default: {DEFAULT_RUN_NAME})",
     )
     sp_run.add_argument(
+        "--cwd",
+        help="Working directory to run the command in (default: current directory)",
+        default="",
+    )
+    sp_run.add_argument(
         "--shell", action="store_true", help="Run task in shell (default: False)"
     )
     sp_run.add_argument(
@@ -135,6 +140,15 @@ def main():
     sp_run.add_argument(
         "--log-file",
         help=f"Path to log file (default: {LOG_PATH_TEMPLATE})",
+    )
+    sp_run.add_argument(
+        "--log-rotate",
+        action="store_true",
+        help="Whether to rotate log file (default: False)",
+    )
+    sp_run.add_argument(
+        "--rotate-log-path",
+        help=f"Path to rotation log file (default: {ROTATE_LOG_PATH_TEMPLATE})",
     )
     sp_run.add_argument(
         "command_list",
@@ -148,23 +162,23 @@ def main():
     if args.command in ["start", "restart"]:
         sp = sp_start if args.command == "start" else sp_restart
         try:
-            name, cmd_cfg = get_task_config(args.name)
+            name, task_cfg = get_task_config(args.name)
         except Exception as e:
             sp.error(str(e))
 
-        cmd_cfg.meta_path = (
-            args.meta_file or cmd_cfg.meta_path or META_PATH_TEMPLATE.format(name=name)
+        task_cfg.meta_path = (
+            args.meta_file or task_cfg.meta_path or META_PATH_TEMPLATE.format(name=name)
         )
-        cmd_cfg.log_path = (
-            args.log_file or cmd_cfg.log_path or LOG_PATH_TEMPLATE.format(name=name)
+        task_cfg.log_path = (
+            args.log_file or task_cfg.log_path or LOG_PATH_TEMPLATE.format(name=name)
         )
-        cmd_cfg.rotate_log_path = (
-            cmd_cfg.rotate_log_path or ROTATE_LOG_PATH_TEMPLATE.format(name=name)
+        task_cfg.rotate_log_path = (
+            task_cfg.rotate_log_path or ROTATE_LOG_PATH_TEMPLATE.format(name=name)
         )
         if args.command == "start":
-            sys.exit(start(cmd_cfg))
+            sys.exit(start(task_cfg))
         else:
-            sys.exit(restart(cmd_cfg))
+            sys.exit(restart(task_cfg))
     elif args.command in ["stop", "status"]:
         sp = sp_stop if args.command == "stop" else sp_status
         if args.meta_file:
@@ -193,14 +207,17 @@ def main():
                 f"Name '{args.name}' already exists in config. Please choose another name."
             )
 
-        cmd_cfg = DmonTaskConfig(
+        task_cfg = DmonTaskConfig(
             name=args.name,
             cmd=shlex.join(args.command_list) if args.shell else args.command_list,
+            cwd=args.cwd,
             meta_path=args.meta_file or META_PATH_TEMPLATE.format(name=args.name),
             log_path=args.log_file or LOG_PATH_TEMPLATE.format(name=args.name),
-            rotate_log_path=ROTATE_LOG_PATH_TEMPLATE.format(name=args.name),
+            log_rotate=args.log_rotate,
+            rotate_log_path=args.rotate_log_path
+            or ROTATE_LOG_PATH_TEMPLATE.format(name=args.name),
         )
-        sys.exit(start(cmd_cfg))
+        sys.exit(start(task_cfg))
     else:
         parser.print_help()
         sys.exit(1)
