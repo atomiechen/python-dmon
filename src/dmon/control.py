@@ -525,14 +525,14 @@ def print_process_table(metas: List[DmonMeta], full_width: bool = False):
 
 def list_processes(dir: PathType, full_width: bool):
     target_dmon_dir = Path(dir).resolve()
-    metas = []
+    metas: List[DmonMeta] = []
     if target_dmon_dir.exists() and target_dmon_dir.is_dir():
         for meta_file in target_dmon_dir.glob(f"*{META_SUFFIX}"):
             meta = DmonMeta.load(meta_file)
             if meta is not None:
                 metas.append(meta)
     # sort by name (case-insensitive)
-    metas.sort(key=lambda m: m.name.lower())
+    metas.sort(key=lambda m: m.task.lower())
     n_task = len(metas)
     processes = print_process_table(metas, full_width)
     n_proc = len(processes)
