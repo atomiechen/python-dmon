@@ -1,4 +1,5 @@
 from pathlib import Path
+import sys
 
 
 DEFAULT_META_DIR = Path(".dmon")
@@ -12,3 +13,5 @@ ROTATE_LOG_PATH_TEMPLATE = str(DEFAULT_LOG_DIR / "{task}.rotate.log")
 
 
 DEFAULT_RUN_NAME = "default_run"
+
+ON_WINDOWS = sys.platform.startswith("win")

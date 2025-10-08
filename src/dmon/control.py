@@ -10,7 +10,7 @@ from typing import List
 import psutil
 from termcolor import colored
 
-from .constants import DEFAULT_META_DIR, META_SUFFIX
+from .constants import DEFAULT_META_DIR, META_SUFFIX, ON_WINDOWS
 from .types import DmonTaskConfig, DmonMeta, PathType
 from .utils import len_ansi, pad_ansi
 
@@ -66,7 +66,7 @@ def start(cfg: DmonTaskConfig):
 
     # Platform-specific parameters to run the process in background detached from parent
     kwargs = {}
-    if sys.platform.startswith("win"):
+    if ON_WINDOWS:
         # DETACHED_PROCESS = 0x00000008
         CREATE_NO_WINDOW = 0x08000000
         kwargs["creationflags"] = CREATE_NO_WINDOW
@@ -213,7 +213,7 @@ def stop(
         meta_path.unlink(missing_ok=True)
         return 1
 
-    if sys.platform.startswith("win"):
+    if ON_WINDOWS:
         ret = terminate_win(proc, timeout)
     else:
         ret = terminate_posix(proc, timeout)
