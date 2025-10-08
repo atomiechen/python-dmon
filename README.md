@@ -68,6 +68,9 @@ dmon stop app
 
 # Check task status
 dmon status app
+
+# Execute a task in the foreground (useful for debugging)
+dmon exec app
 ```
 
 If only one task is defined in the config file, you can omit the task name:
@@ -76,6 +79,14 @@ If only one task is defined in the config file, you can omit the task name:
 dmon start
 dmon stop
 dmon status
+dmon exec
+```
+
+You can use `--config` to specify a custom config file:
+
+```sh
+dmon start --config /path/to/dmon.yaml app  # YAML
+dmon start --config /path/to/pyproject.toml app  # or TOML
 ```
 
 
