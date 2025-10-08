@@ -16,14 +16,28 @@ from .constants import (
 from .types import DmonTaskConfig
 
 
+def get_version():
+    # if python 3.8 or later, use importlib.metadata
+    import importlib.metadata
+
+    return importlib.metadata.version("python-dmon")
+
+
 def main():
     just_fix_windows_console()
 
     parser = argparse.ArgumentParser(
         prog="dmon",
-        description="Minimal cross-platform daemon manager",
+        description=f"dmon v{get_version()} - Lightweight cross-platform daemon manager",
         # formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
+    parser.add_argument(
+        "-v",
+        "--version",
+        action="version",
+        version=get_version(),
+    )
+
     subparsers = parser.add_subparsers(dest="command")
 
     # start subcommand
