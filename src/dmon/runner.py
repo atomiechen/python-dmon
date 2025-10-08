@@ -116,6 +116,24 @@ def main(
     )
 
     shell = isinstance(cmd, str)
+
+    # register signal handler to terminate the child process
+    def signal_handler(signum: int, frame):
+        logger.info(f"Received signal {signum}, forwarding to child process...")
+        if sys.platform.startswith("win") and signum == signal.SIGINT:
+            signum = signal.SIGTERM
+            logger.info(f"On Windows, convert SIGINT to SIGTERM ({signum})")
+        # proc.terminate()
+        proc.send_signal(signum)
+        logger.info("Waiting for child process to exit...")
+        proc.wait()
+        logger.info("Child process exited, all done.")
+        sys.exit(0)
+
+    # Set up signal handlers
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
     # Start the child process with stdout/stderr redirected to the log
     # env will be inherited from parent process
     # cwd will be inherited from parent process
@@ -127,20 +145,6 @@ def main(
         text=False,  # binary mode
         bufsize=0,  # unbuffered
     )
-
-    # register signal handler to terminate the child process
-    def signal_handler(signum, frame):
-        logger.info(f"Received signal {signum}, forwarding to child process...")
-        # proc.terminate()
-        proc.send_signal(signum)
-        logger.info("Waiting for child process to exit...")
-        proc.wait()
-        logger.info("Child process exited, all done.")
-        sys.exit(0)
-
-    # Set up signal handlers
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
 
     logger.info(f"Started process {proc.pid} with command: {cmd} (shell={shell})")
 
