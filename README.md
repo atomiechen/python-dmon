@@ -89,6 +89,18 @@ dmon start --config /path/to/dmon.yaml app  # YAML
 dmon start --config /path/to/pyproject.toml app  # or TOML
 ```
 
+And yes, you can use `dmon` to run in a nested manner:
+
+```yaml
+tasks:
+  app: ["python", "-u", "server.py"]
+  nested: pwd && dmon exec app  # nest `dmon exec`
+  subdir_task1:
+    cwd: /path/to/dir
+    cmd: ["dmon", "exec", "app"]  # run task defined in another folder
+  subdir_task2: dmon exec app --config /path/to/dir/dmon.yaml  # like above
+```
+
 
 ### Run an ad-hoc command
 
