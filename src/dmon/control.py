@@ -557,6 +557,9 @@ def execute(cfg: DmonTaskConfig):
         env = {**os.environ, **cfg.env}
 
     shell = isinstance(cfg.cmd, str)
+    if ON_WINDOWS and isinstance(cfg.cmd, list) and len(cfg.cmd) > 0:
+        # On Windows, use full path for the executable when shell=False
+        cfg.cmd[0] = shutil.which(cfg.cmd[0]) or cfg.cmd[0]
 
     def signal_handler(signum: int, frame) -> None:
         if ON_WINDOWS and signum == signal.SIGINT:
