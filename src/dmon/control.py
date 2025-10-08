@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 import shlex
 import shutil
+import signal
 import sys
 import subprocess
 import time
@@ -540,3 +541,41 @@ def list_processes(dir: PathType, full_width: bool):
         file=sys.stderr,
     )
     return 0
+
+
+def execute(cfg: DmonTaskConfig):
+    """
+    Execute the command in the foreground.
+    This is used for the 'dmon exec' command.
+    """
+    cwd = Path(cfg.cwd).resolve()
+
+    env = None  # default behavior of Popen
+    if cfg.override_env:
+        env = cfg.env
+    elif cfg.env:
+        env = {**os.environ, **cfg.env}
+
+    shell = isinstance(cfg.cmd, str)
+
+    def signal_handler(signum: int, frame) -> None:
+        if ON_WINDOWS and signum == signal.SIGINT:
+            signum = signal.SIGTERM
+        proc.send_signal(signum)
+
+    prev_handle_int = signal.signal(signal.SIGINT, signal_handler)
+    prev_handle_term = signal.signal(signal.SIGTERM, signal_handler)
+
+    proc = subprocess.Popen(
+        cfg.cmd,
+        cwd=cwd,
+        env=env,
+        shell=shell,
+        bufsize=0,  # unbuffered
+        close_fds=False,
+    )
+    ret = proc.wait()
+
+    signal.signal(signal.SIGTERM, prev_handle_term)
+    signal.signal(signal.SIGINT, prev_handle_int)
+    return ret

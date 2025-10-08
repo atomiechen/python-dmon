@@ -5,7 +5,7 @@ import sys
 from colorama import just_fix_windows_console
 
 from .config import check_name_in_config, get_task_config
-from .control import list_processes, restart, start, stop, status
+from .control import execute, list_processes, restart, start, stop, status
 from .constants import (
     DEFAULT_META_DIR,
     DEFAULT_RUN_NAME,
@@ -176,8 +176,19 @@ def main():
         help="Command (with args) to run",
     )
 
+    sp_exec = subparsers.add_parser(
+        "exec",
+        help="Execute a configured task in the foreground",
+        description="Execute a configured task in the foreground",
+    )
+    sp_exec.add_argument(
+        "task",
+        help="Configured task name (default: the only task if there's just one)",
+        nargs="?",
+    )
+
     # add custom config file option
-    for sp in [sp_start, sp_stop, sp_restart, sp_status]:
+    for sp in [sp_start, sp_stop, sp_restart, sp_status, sp_exec]:
         sp.add_argument(
             "--config",
             help="Path to config file (YAML or TOML) (default: search from current directory upwards)",
@@ -205,6 +216,12 @@ def main():
             sys.exit(start(task_cfg))
         else:
             sys.exit(restart(task_cfg))
+    elif args.command == "exec":
+        try:
+            task, task_cfg = get_task_config(args.task, args.config)
+        except Exception as e:
+            sp_exec.error(str(e))
+        sys.exit(execute(task_cfg))
     elif args.command in ["stop", "status"]:
         sp = sp_stop if args.command == "stop" else sp_status
         if args.meta_file:
