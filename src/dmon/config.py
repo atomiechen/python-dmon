@@ -10,79 +10,45 @@ else:
 from .types import CmdType, DmonTaskConfig
 
 
-def find_pyproject_toml(start: Optional[Path] = None):
-    """
-    Search for pyproject.toml from the current directory (or specified directory) upwards.
-    Return a Path object if found.
-    """
-    start = start or Path.cwd()
-    current = start.resolve()
-
-    for parent in [current, *current.parents]:
-        candidate = parent / "pyproject.toml"
-        if candidate.is_file():
-            return candidate
-
-    # raise FileNotFoundError(f"No pyproject.toml found from {start} upwards.")
-
-
-def find_dmon_yaml(start: Optional[Path] = None):
-    """
-    Search for dmon.yaml / dmon.yml from the current directory (or specified directory) upwards.
-    Return a Path object if found.
-    """
-    start = start or Path.cwd()
-    current = start.resolve()
-
-    for parent in [current, *current.parents]:
-        for filename in ["dmon.yaml", "dmon.yml"]:
-            candidate = parent / filename
-            if candidate.is_file():
-                return candidate
-
-    # raise FileNotFoundError(f"No dmon.yaml or dmon.yml found from {start} upwards.")
-
-
 def load_config(cfg_path: Optional[str] = None):
     """
-    Load configuration from the given path, or search for dmon.yaml or pyproject.toml.
+    Load configuration from the given path, or search it from the current working directory upwards.
     """
 
-    # Load configuration from the given path
     if cfg_path:
+        # Load configuration from the given path
         path = Path(cfg_path).resolve()
         if not path.exists():
             raise FileNotFoundError(f"Config file '{path}' does not exist.")
-        if path.suffix in [".yaml", ".yml"]:
-            import yaml
-
-            with path.open("r", encoding="utf-8") as f:
-                cfg = yaml.safe_load(f)
-        elif path.suffix == ".toml":
-            with path.open("rb") as f:
-                cfg = tomllib.load(f)
-            cfg = cfg.get("tool", {}).get("dmon", {})
-        else:
-            raise ValueError("Config file must be YAML (.yaml/.yml) or TOML (.toml)")
-        return cfg, path
-
-    # No path provided, search for dmon.yaml first, then pyproject.toml
-    path = find_dmon_yaml()
-    if path:
-        import yaml
-
-        with path.open("r", encoding="utf-8") as f:
-            cfg = yaml.safe_load(f)
     else:
-        path = find_pyproject_toml()
+        # No path provided, search for config files
+        # starting from the current working directory upwards
+        current = Path.cwd().resolve()
+        path = None
+        for parent in [current, *current.parents]:
+            for filename in ["dmon.yaml", "dmon.yml", "pyproject.toml"]:
+                path = parent / filename
+                if path.is_file():
+                    break
+            else:
+                continue  # Only break out of the inner loop if a file was found
+            break  # Break out of the outer loop if a file was found
         if not path:
             raise FileNotFoundError(
                 "No dmon.yaml or pyproject.toml found in current or any parent directory."
             )
 
+    if path.suffix in [".yaml", ".yml"]:
+        import yaml
+
+        with path.open("r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f)
+    elif path.suffix == ".toml":
         with path.open("rb") as f:
             cfg = tomllib.load(f)
         cfg = cfg.get("tool", {}).get("dmon", {})
+    else:
+        raise ValueError("Config file must be YAML (.yaml/.yml) or TOML (.toml)")
     return cfg, path
 
 
