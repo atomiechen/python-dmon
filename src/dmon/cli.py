@@ -162,12 +162,19 @@ def main():
         help="Command (with args) to run",
     )
 
+    # add custom config file option
+    for sp in [sp_start, sp_stop, sp_restart, sp_status]:
+        sp.add_argument(
+            "--config",
+            help="Path to config file (YAML or TOML) (default: search from current directory upwards)",
+        )
+
     args = parser.parse_args()
 
     if args.command in ["start", "restart"]:
         sp = sp_start if args.command == "start" else sp_restart
         try:
-            task, task_cfg = get_task_config(args.task)
+            task, task_cfg = get_task_config(args.task, args.config)
         except Exception as e:
             sp.error(str(e))
 
@@ -193,7 +200,7 @@ def main():
                 task = args.task
             else:
                 try:
-                    task, _ = get_task_config(args.task)
+                    task, _ = get_task_config(args.task, args.config)
                 except Exception as e:
                     sp.error(str(e))
             meta_path = META_PATH_TEMPLATE.format(task=task)

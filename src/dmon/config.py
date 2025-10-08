@@ -43,7 +43,30 @@ def find_dmon_yaml(start: Optional[Path] = None):
     # raise FileNotFoundError(f"No dmon.yaml or dmon.yml found from {start} upwards.")
 
 
-def load_config():
+def load_config(cfg_path: Optional[str] = None):
+    """
+    Load configuration from the given path, or search for dmon.yaml or pyproject.toml.
+    """
+
+    # Load configuration from the given path
+    if cfg_path:
+        path = Path(cfg_path).resolve()
+        if not path.exists():
+            raise FileNotFoundError(f"Config file '{path}' does not exist.")
+        if path.suffix in [".yaml", ".yml"]:
+            import yaml
+
+            with path.open("r", encoding="utf-8") as f:
+                cfg = yaml.safe_load(f)
+        elif path.suffix == ".toml":
+            with path.open("rb") as f:
+                cfg = tomllib.load(f)
+            cfg = cfg.get("tool", {}).get("dmon", {})
+        else:
+            raise ValueError("Config file must be YAML (.yaml/.yml) or TOML (.toml)")
+        return cfg, path
+
+    # No path provided, search for dmon.yaml first, then pyproject.toml
     path = find_dmon_yaml()
     if path:
         import yaml
@@ -151,14 +174,15 @@ def validate_task(task, name: str) -> DmonTaskConfig:
     return ret
 
 
-def get_task_config(name: Optional[str] = None):
+def get_task_config(name: Optional[str], cfg_path: Optional[str]):
     """
-    Get the validated task configuration for the given task name from [tool.dmon.tasks] or dmon.yaml.
-
+    Get the validated task configuration for the given task name.
     If name is None or empty, and there is only one task, return that task; otherwise, raise ValueError.
     If the task is not found, or required fields are missing, raise TypeError or ValueError.
+
+    The config is loaded from the given path, or searched for dmon.yaml or pyproject.toml.
     """
-    cfg, path = load_config()
+    cfg, path = load_config(cfg_path)
     tasks = cfg.get("tasks", {})
 
     if not isinstance(tasks, dict):
