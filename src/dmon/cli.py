@@ -191,7 +191,7 @@ def main():
     for sp in [sp_start, sp_stop, sp_restart, sp_status, sp_exec]:
         sp.add_argument(
             "--config",
-            help="Path to config file (YAML or TOML) (default: search from current directory upwards)",
+            help="Path to config file or the directory containing it (default: search from current directory upwards)",
         )
 
     args = parser.parse_args()

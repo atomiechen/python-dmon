@@ -10,6 +10,21 @@ else:
 from .types import CmdType, DmonTaskConfig
 
 
+def search_config(start_dir: Path, recursive: bool) -> Optional[Path]:
+    """
+    Search for dmon.yaml, dmon.yml, or pyproject.toml from the given directory upwards.
+    Return the path if found, None otherwise.
+    """
+    current = start_dir.resolve()
+    directories = [current] if not recursive else [current, *current.parents]
+    for parent in directories:
+        for filename in ["dmon.yaml", "dmon.yml", "pyproject.toml"]:
+            path = parent / filename
+            if path.is_file():
+                return path
+    return None
+
+
 def load_config(cfg_path: Optional[str] = None):
     """
     Load configuration from the given path, or search it from the current working directory upwards.
@@ -19,20 +34,20 @@ def load_config(cfg_path: Optional[str] = None):
         # Load configuration from the given path
         path = Path(cfg_path).resolve()
         if not path.exists():
-            raise FileNotFoundError(f"Config file '{path}' does not exist.")
+            raise FileNotFoundError(
+                f"Config file or directory '{path}' does not exist."
+            )
+        elif path.is_dir():
+            # If it's a directory, search for config files in it
+            result = search_config(path, recursive=False)
+            if not result:
+                raise FileNotFoundError(
+                    f"No dmon.yaml or pyproject.toml found in directory '{path}'."
+                )
+            path = result
     else:
-        # No path provided, search for config files
-        # starting from the current working directory upwards
-        current = Path.cwd().resolve()
-        path = None
-        for parent in [current, *current.parents]:
-            for filename in ["dmon.yaml", "dmon.yml", "pyproject.toml"]:
-                path = parent / filename
-                if path.is_file():
-                    break
-            else:
-                continue  # Only break out of the inner loop if a file was found
-            break  # Break out of the outer loop if a file was found
+        # No path provided, search from the current working directory upwards
+        path = search_config(Path.cwd(), recursive=True)
         if not path:
             raise FileNotFoundError(
                 "No dmon.yaml or pyproject.toml found in current or any parent directory."
