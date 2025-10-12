@@ -52,7 +52,7 @@ app = ["python", "-u", "server.py"]
 ```
 
 Commands can be a single string (run in shell), or list of strings (exec form).
-See [Example Task Configuration](#example-task-configuration) for more configuration options.
+See [Example Configuration](#example-configuration) for more configuration options.
 
 
 ### Run tasks
@@ -73,7 +73,7 @@ dmon status app
 dmon exec app
 ```
 
-If only one task is defined in the config file, you can omit the task name:
+If you have defined `default_task`, or only one task is defined in the config file, you can omit the task name:
 
 ```sh
 dmon start
@@ -82,11 +82,12 @@ dmon status
 dmon exec
 ```
 
-You can use `--config` to specify a custom config file:
+You can use `--config` to specify a custom config file or the directory containing it:
 
 ```sh
 dmon start --config /path/to/dmon.yaml app  # YAML
 dmon start --config /path/to/pyproject.toml app  # or TOML
+dmon start --config /path/to/dir app  # dir with `dmon.y(a)ml` or `pyproject.toml`
 ```
 
 And yes, you can use `dmon` to run in a nested manner:
@@ -126,7 +127,7 @@ dmon list
 ```
 
 
-## Example Task Configuration
+## Example Configuration
 
 A task can be a **string**, **list**, or **dictionary**.
 
@@ -147,7 +148,22 @@ tasks:
     rotate_log_path: "logs/<task>.rotate.log"  # path to rotation log
     rotate_log_max_size: 5  # max rotation log file size in MB
     meta_path: ".dmon/<task>.meta.json"  # path to meta file
+default_task: your_task_name  # the default task name
 ```
+
+In TOML, write like this:
+
+```toml
+[tool.dmon.tasks]
+your_task_name = { cmd = [
+  "python", "-u", "server.py"
+], ... }
+another_task = "cd subdir && ls && bash start.sh"
+
+[tool.dmon]
+default_task = "your_task_name"
+```
+
 
 ## Under the Hood
 
