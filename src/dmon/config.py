@@ -169,6 +169,8 @@ def get_task_config(name: Optional[str], cfg_path: Optional[str]):
     if not isinstance(tasks, dict):
         raise TypeError("'tasks' must be a table")
 
+    name = name or cfg.get("default_task", None)
+
     if not name:
         if len(tasks) == 0:
             raise ValueError(f"No task found in {path}")
