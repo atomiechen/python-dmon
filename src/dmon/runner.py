@@ -167,7 +167,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--max-log-size",
         help="Max log file size (MB); 0 for no rotation",
-        type=int,
+        type=float,
         default=5,
     )
     parser.add_argument(
@@ -178,15 +178,15 @@ if __name__ == "__main__":
     parser.add_argument(
         "--max-rotate-log-size",
         help="Max file size (MB) for this rotation log; 0 for no rotation",
-        type=int,
+        type=float,
         default=5,
     )
     args = parser.parse_args()
     main(
         " ".join(args.command) if args.shell else args.command,
         args.log_path,
-        args.max_log_size * 1024 * 1024,
+        int(args.max_log_size * 1024 * 1024),
         args.rotate_log_path,
-        args.max_rotate_log_size * 1024 * 1024,
+        int(args.max_rotate_log_size * 1024 * 1024),
     )
     logger.info("Process finished.")

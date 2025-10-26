@@ -121,9 +121,9 @@ def validate_task(task, name: str) -> DmonTaskConfig:
             ret.log_rotate = task["log_rotate"]
 
         if "log_max_size" in task:
-            if not isinstance(task["log_max_size"], int) or task["log_max_size"] <= 0:
+            if not isinstance(task["log_max_size"], (int, float)) or task["log_max_size"] <= 0:
                 raise TypeError(
-                    f"Task '{name}' 'log_max_size' field must be a positive integer"
+                    f"Task '{name}' 'log_max_size' field must be a positive number"
                 )
             ret.log_max_size = task["log_max_size"]
 
@@ -136,11 +136,11 @@ def validate_task(task, name: str) -> DmonTaskConfig:
 
         if "rotate_log_max_size" in task:
             if (
-                not isinstance(task["rotate_log_max_size"], int)
+                not isinstance(task["rotate_log_max_size"], (int, float))
                 or task["rotate_log_max_size"] <= 0
             ):
                 raise TypeError(
-                    f"Task '{name}' 'rotate_log_max_size' field must be a positive integer"
+                    f"Task '{name}' 'rotate_log_max_size' field must be a positive number"
                 )
             ret.rotate_log_max_size = task["rotate_log_max_size"]
 
