@@ -31,11 +31,11 @@ class DmonTaskConfig:
     """Path to log file"""
     log_rotate: bool = False
     """Whether to rotate log file"""
-    log_max_size: int = 5
+    log_max_size: float = 5
     """Size in MB to rotate log file"""
     rotate_log_path: str = ""
     """Path to rotation log file"""
-    rotate_log_max_size: int = 5
+    rotate_log_max_size: float = 5
     """Size in MB to rotation log file"""
     meta_path: str = ""
     """Path to meta file"""
