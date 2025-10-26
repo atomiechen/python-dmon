@@ -23,6 +23,7 @@ Changelog = "https://github.com/atomiechen/python-dmon/blob/main/CHANGELOG.md"
 
 [project.scripts]
 dmon = "dmon.__main__:main"
+python-dmon = "dmon.__main__:main"
 
 [build-system]
 requires = ["uv_build>=0.8.4,<0.9.0"]
