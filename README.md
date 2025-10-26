@@ -20,6 +20,8 @@ It is a Python-based and more powerful successor to the [handy-backend shell scr
 - 🧩 **Flexible tasks:** Tasks can be configured in `pyproject.toml` or `dmon.yaml`; or run ad-hoc commands directly.
 - 🪵 **Logging & log rotation:** Automatically manage log files to prevent uncontrolled growth.
 
+![dmon-demo-gif](https://github.com/user-attachments/assets/9bae2f46-5ef4-4784-aced-18d573204efc)
+
 
 ## Installation
 
