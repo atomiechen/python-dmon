@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 
 
+## [0.2.3] - 2025-10-25
+
+### Added
+
+- Add `default_task` key to config to specify the default task to run when no task name is provided.
+- `--config` now supports specifying a directory to search in, not just a file path.
+- Add `python-dmon` as CLI alias in addition to `dmon` for better package name consistency.
+
+
+### Fixed
+
+- Fix `--config` non-existing path
+
+
+
 ## [0.2.2] - 2025-10-09
 
 ### Fixed

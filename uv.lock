@@ -33,7 +33,7 @@ wheels = [
 
 [[package]]
 name = "python-dmon"
-version = "0.2.2"
+version = "0.2.3"
 source = { editable = "." }
 dependencies = [
     { name = "colorama" },
