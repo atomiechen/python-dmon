@@ -23,8 +23,33 @@ It is a Python-based and more powerful successor to the [handy-backend shell scr
 
 ## Installation
 
+`python-dmon` is available on [PyPI](https://pypi.org/project/python-dmon/):
+
 ```sh
 pip install python-dmon
+```
+
+We recommend installing into an isolated environment, e.g., with `uv` / `pipx`:
+
+```sh
+# Install globally with uv tool
+uv tool install python-dmon
+
+# Or with pipx
+pipx install python-dmon
+
+# Add as a dev dependency in your project
+uv add --dev python-dmon
+```
+
+You can also invoke without installing:
+
+```sh
+# With uvx (uv tool run)
+uvx python-dmon
+
+# Or with pipx
+pipx run python-dmon
 ```
 
 To get the latest features, install from source:
