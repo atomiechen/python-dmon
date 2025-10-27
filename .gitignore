@@ -211,6 +211,8 @@ __marimo__/
 Thumbs.db
 
 *.log
+*.log.*
+logs/
 *.pid
 tmp*
 dmon.yaml
