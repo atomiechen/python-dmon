@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 
 
+## [0.2.4] - [2025-12-16]
+
+### Added
+
+- Config `log_max_size` and `rotate_log_max_size` now support float values representing size in MB.
+
+
+
 ## [0.2.3] - 2025-10-25
 
 ### Added

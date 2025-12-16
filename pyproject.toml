@@ -1,6 +1,6 @@
 [project]
 name = "python-dmon"
-version = "0.2.3"
+version = "0.2.4"
 description = "A lightweight, cross-platform daemon manager that runs any command as a background process."
 readme = "README.md"
 authors = [
