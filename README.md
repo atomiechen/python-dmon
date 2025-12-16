@@ -68,14 +68,16 @@ Create a `dmon.yaml` file:
 
 ```yaml
 tasks:
-  app: ["python", "-u", "server.py"]
+  app: ["python", "-u", "server.py"]  # option 1: exec form
+  # app: "python -u server.py"  # option 2: shell string
 ```
 
 Or add to your `pyproject.toml`:
 
 ```toml
 [tool.dmon.tasks]
-app = ["python", "-u", "server.py"]
+app = ["python", "-u", "server.py"]  # option 1: exec form
+# app = "python -u server.py"  # option 2: shell string
 ```
 
 Commands can be a single string (run in shell), or list of strings (exec form).
