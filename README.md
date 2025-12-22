@@ -3,6 +3,7 @@
 
 [![GitHub](https://img.shields.io/badge/github-python--dmon-blue?logo=github)](https://github.com/atomiechen/python-dmon)
 [![PyPI](https://img.shields.io/pypi/v/python--dmon?logo=pypi&logoColor=white)](https://pypi.org/project/python-dmon/)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/atomiechen/python-dmon)
 
 
 A lightweight, cross-platform daemon manager that runs any command — called a *task* — as a background process. 
