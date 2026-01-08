@@ -5,7 +5,15 @@ import sys
 from colorama import just_fix_windows_console
 
 from .config import check_name_in_config, get_task_config
-from .control import execute, list_processes, restart, start, stop, status
+from .control import (
+    execute,
+    get_meta_paths,
+    list_processes,
+    restart,
+    start,
+    stop,
+    status,
+)
 from .constants import (
     DEFAULT_META_DIR,
     DEFAULT_RUN_NAME,
@@ -74,6 +82,7 @@ def main():
         nargs="*",
     )
     sp_stop.add_argument("--meta-file", help="Path to meta file")
+    sp_stop.add_argument("--all", action="store_true", help="Stop all processes")
 
     # restart subcommand
     sp_restart = subparsers.add_parser(
@@ -111,6 +120,9 @@ def main():
     sp_status.add_argument(
         "--meta-file",
         help=f"Path to meta file (default: {META_PATH_TEMPLATE})",
+    )
+    sp_status.add_argument(
+        "-a", "--all", action="store_true", help="Check status of all processes"
     )
 
     # list subcommand
@@ -224,19 +236,22 @@ def main():
         sys.exit(execute(task_cfg))
     elif args.command in ["stop", "status"]:
         sp = sp_stop if args.command == "stop" else sp_status
-        if args.meta_file:
-            meta_path = args.meta_file
-            meta_paths = [meta_path]
+        if args.all:
+            meta_paths = get_meta_paths(DEFAULT_META_DIR)
         else:
-            if len(args.task) > 0:
-                tasks = args.task
+            if args.meta_file:
+                meta_path = args.meta_file
+                meta_paths = [meta_path]
             else:
-                try:
-                    task, _ = get_task_config(args.task, args.config)
-                except Exception as e:
-                    sp.error(str(e))
-                tasks = [task]
-            meta_paths = [META_PATH_TEMPLATE.format(task=task) for task in tasks]
+                if len(args.task) > 0:
+                    tasks = args.task
+                else:
+                    try:
+                        task, _ = get_task_config(args.task, args.config)
+                    except Exception as e:
+                        sp.error(str(e))
+                    tasks = [task]
+                meta_paths = [META_PATH_TEMPLATE.format(task=task) for task in tasks]
         if args.command == "stop":
             sys.exit(stop(meta_paths))
         else:
