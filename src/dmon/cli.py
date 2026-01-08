@@ -64,14 +64,14 @@ def main():
     # stop subcommand
     sp_stop = subparsers.add_parser(
         "stop",
-        help="Stop a background process",
-        description="Stop a background process given name or meta file",
+        help="Stop background process(es)",
+        description="Stop background process(es) given name or meta file",
         # formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     sp_stop.add_argument(
         "task",
         help="Configured task name (default: the only task if there's just one)",
-        nargs="?",
+        nargs="*",
     )
     sp_stop.add_argument("--meta-file", help="Path to meta file")
 
@@ -99,14 +99,14 @@ def main():
     # status subcommand
     sp_status = subparsers.add_parser(
         "status",
-        help="Check process status",
-        description="Check status of a background process given name or meta file",
+        help="Check status of background process(es)",
+        description="Check status of background process(es) given name or meta file",
         # formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     sp_status.add_argument(
         "task",
         help="Configured task name (default: the only task if there's just one)",
-        nargs="?",
+        nargs="*",
     )
     sp_status.add_argument(
         "--meta-file",
@@ -226,19 +226,21 @@ def main():
         sp = sp_stop if args.command == "stop" else sp_status
         if args.meta_file:
             meta_path = args.meta_file
+            meta_paths = [meta_path]
         else:
-            if args.task:
-                task = args.task
+            if len(args.task) > 0:
+                tasks = args.task
             else:
                 try:
                     task, _ = get_task_config(args.task, args.config)
                 except Exception as e:
                     sp.error(str(e))
-            meta_path = META_PATH_TEMPLATE.format(task=task)
+                tasks = [task]
+            meta_paths = [META_PATH_TEMPLATE.format(task=task) for task in tasks]
         if args.command == "stop":
-            sys.exit(stop(meta_path))
+            sys.exit(stop(meta_paths))
         else:
-            sys.exit(status(meta_path))
+            sys.exit(status(meta_paths))
     elif args.command == "list":
         dir = args.dir or DEFAULT_META_DIR
         sys.exit(list_processes(dir, args.full))

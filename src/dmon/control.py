@@ -6,7 +6,7 @@ import signal
 import sys
 import subprocess
 import time
-from typing import List
+from typing import List, Sequence
 
 import psutil
 from termcolor import colored
@@ -166,7 +166,17 @@ def start(cfg: DmonTaskConfig):
     return 0
 
 
-def stop(
+def stop(meta_paths: Sequence[PathType], timeout=5.0):
+    ret = 0
+    for idx, meta_path in enumerate(meta_paths):
+        # non-zero if any stop() fails
+        ret |= stop_single(meta_path=meta_path, timeout=timeout)
+        if idx < len(meta_paths) - 1:
+            print(file=sys.stderr)  # print a blank line between tasks
+    return ret
+
+
+def stop_single(
     meta_path: PathType,
     timeout=5.0,
 ):
@@ -348,30 +358,36 @@ def restart(
     cfg: DmonTaskConfig,
     timeout=5.0,
 ):
-    stop(cfg.meta_path, timeout)
+    stop_single(cfg.meta_path, timeout)
     print("--- Restarting ---", file=sys.stderr)
     return start(cfg)
 
 
-def status(meta_path: PathType):
-    meta_path = Path(meta_path).resolve()
-    meta = DmonMeta.load(meta_path)
-    if meta is None:
-        print(
-            colored(
-                "Status failed: meta file not found (maybe not started)\n",
-                color="red",
-                attrs=["bold"],
+def status(meta_paths: Sequence[PathType]):
+    ret = 0
+    metas = []
+    for meta_path in meta_paths:
+        meta_path = Path(meta_path).resolve()
+        meta = DmonMeta.load(meta_path)
+        if meta is None:
+            print(
+                colored(
+                    "Status failed: meta file not found (maybe not started)\n",
+                    color="red",
+                    attrs=["bold"],
+                )
+                + str(meta_path),
+                file=sys.stderr,
             )
-            + str(meta_path),
-            file=sys.stderr,
-        )
-        return 1
-
-    print_status(meta)
-    print("\nProcess Tree:", file=sys.stderr)
-    print_process_table([meta])
-    return 0
+            ret |= 1
+        else:
+            print_status(meta)
+            print("---", file=sys.stderr)
+            metas.append(meta)
+    if metas:
+        print("\nProcess Tree:", file=sys.stderr)
+        print_process_table(metas)
+    return ret
 
 
 def check_same_process(proc: psutil.Process, create_time: float) -> bool:
