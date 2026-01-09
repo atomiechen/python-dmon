@@ -1,4 +1,5 @@
 import argparse
+from pathlib import Path
 import shlex
 import sys
 
@@ -83,7 +84,11 @@ def main():
         nargs="*",
     )
     sp_stop.add_argument("--meta-file", help="Path to meta file")
-    sp_stop.add_argument("--all", action="store_true", help="Stop all processes")
+    sp_stop.add_argument(
+        "--all",
+        action="store_true",
+        help=f"Stop all processes in meta dir ({DEFAULT_META_DIR})",
+    )
 
     # restart subcommand
     sp_restart = subparsers.add_parser(
@@ -124,7 +129,10 @@ def main():
         help=f"Path to meta file (default: {META_PATH_TEMPLATE})",
     )
     sp_status.add_argument(
-        "-a", "--all", action="store_true", help="Check status of all processes"
+        "-a",
+        "--all",
+        action="store_true",
+        help=f"Check status of all processes in meta dir ({DEFAULT_META_DIR})",
     )
 
     # list subcommand
@@ -248,25 +256,36 @@ def main():
         sys.exit(execute(task_cfgs[0]))
     elif args.command in ["stop", "status"]:
         sp = sp_stop if args.command == "stop" else sp_status
+        meta_paths = []
+
+        # Collect meta paths from --all
         if args.all:
-            meta_paths = get_meta_paths(DEFAULT_META_DIR)
-        else:
-            if args.meta_file:
-                meta_path = args.meta_file
-                meta_paths = [meta_path]
-            else:
-                if len(args.task) > 0:
-                    tasks = args.task
-                else:
-                    try:
-                        tasks, _ = get_task_config(args.task, args.config)
-                    except Exception as e:
-                        sp.error(str(e))
-                meta_paths = [META_PATH_TEMPLATE.format(task=task) for task in tasks]
+            meta_paths.extend(get_meta_paths(DEFAULT_META_DIR))
+
+        # Collect meta paths from --meta-file
+        if args.meta_file:
+            meta_paths.append(args.meta_file)
+
+        # Collect meta paths from task names
+        if len(args.task) > 0:
+            tasks = args.task
+            meta_paths.extend([META_PATH_TEMPLATE.format(task=task) for task in tasks])
+
+        # If no meta paths collected, use default task
+        if len(meta_paths) == 0:
+            try:
+                tasks, _ = get_task_config(args.task, args.config)
+            except Exception as e:
+                sp.error(str(e))
+            meta_paths.extend([META_PATH_TEMPLATE.format(task=task) for task in tasks])
+
+        # Remove duplicates
+        unique_meta_paths = sorted(set(Path(p).resolve() for p in meta_paths))
+
         if args.command == "stop":
-            sys.exit(stop(meta_paths))
+            sys.exit(stop(unique_meta_paths))
         else:
-            sys.exit(status(meta_paths))
+            sys.exit(status(unique_meta_paths))
     elif args.command == "list":
         dir = args.dir or DEFAULT_META_DIR
         sys.exit(list_processes(dir, args.full))

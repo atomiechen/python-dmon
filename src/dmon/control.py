@@ -556,8 +556,6 @@ def get_meta_paths(dir: PathType) -> List[Path]:
     if target_dmon_dir.exists() and target_dmon_dir.is_dir():
         for meta_file in target_dmon_dir.glob(f"*{META_SUFFIX}"):
             meta_paths.append(meta_file)
-    # sort by name (case-insensitive)
-    meta_paths.sort(key=lambda p: p.stem.lower())
     return meta_paths
 
 
