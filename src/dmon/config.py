@@ -159,10 +159,11 @@ def validate_task(task, name: str) -> DmonTaskConfig:
 
 
 def get_task_config(
-    names: Union[Sequence[str], str, None], cfg_path: Optional[str]
+    names: Union[Sequence[str], str, None], cfg_path: Optional[str], all: bool = False
 ) -> Tuple[Sequence[str], List[DmonTaskConfig]]:
     """
     Get the validated task configurations for the given task names.
+    If 'all' is True, return all tasks.
     If no name specified, and there is only one task, return that task; otherwise, raise ValueError.
     If any task is not found, or required fields are missing, raise TypeError or ValueError.
 
@@ -174,12 +175,11 @@ def get_task_config(
     if not isinstance(tasks, dict):
         raise TypeError("'tasks' must be a table")
 
-    if names is None:
-        names = []
-    if isinstance(names, str):
+    if all:
+        names = list(tasks.keys())
+    elif isinstance(names, str):
         names = [names]
-
-    if len(names) == 0:
+    elif names is None or len(names) == 0:
         default_task_name = cfg.get("default_task", None)
         if default_task_name:
             if not isinstance(default_task_name, str):

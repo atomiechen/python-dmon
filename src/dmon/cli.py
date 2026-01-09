@@ -68,6 +68,7 @@ def main():
         "--log-file",
         help=f"Path to log file (default: task configured or {LOG_PATH_TEMPLATE})",
     )
+    sp_start.add_argument("--all", action="store_true", help="Start all processes")
 
     # stop subcommand
     sp_stop = subparsers.add_parser(
@@ -104,6 +105,7 @@ def main():
         "--log-file",
         help=f"Path to log file (default: task configured or {LOG_PATH_TEMPLATE})",
     )
+    sp_restart.add_argument("--all", action="store_true", help="Restart all processes")
 
     # status subcommand
     sp_status = subparsers.add_parser(
@@ -211,7 +213,7 @@ def main():
     if args.command in ["start", "restart"]:
         sp = sp_start if args.command == "start" else sp_restart
         try:
-            tasks, task_cfgs = get_task_config(args.task, args.config)
+            tasks, task_cfgs = get_task_config(args.task, args.config, args.all)
         except Exception as e:
             sp.error(str(e))
 
@@ -223,7 +225,7 @@ def main():
                 task_cfgs[0].log_path = args.log_file or task_cfgs[0].log_path
             else:
                 sp.error(
-                    "--meta-file and --log-file can only be specified when starting/restarting a single task"
+                    f"'--meta-file' and '--log-file' can only be specified when {args.command}ing a single task"
                 )
         # fill in default values if not provided
         for task, task_cfg in zip(tasks, task_cfgs):
