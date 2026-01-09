@@ -6,7 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 
 
-## [0.2.4] - [2025-12-16]
+## [0.3.0] - 2026-01-09
+
+### Added
+
+- Multiple task names support for `start`, `restart`, `stop`, and `status` commands
+- `--all` flag for `start`, `restart`, `stop`, and `status` commands to operate on all tasks
+
+
+### Changed
+
+- `stop` and `status` commands can combine task names, `--meta-file`, and (newly added) `--all` flag simultaneously
+
+
+
+## [0.2.4] - 2025-12-16
 
 ### Added
 
