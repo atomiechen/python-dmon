@@ -96,6 +96,9 @@ dmon start app
 # Stop a running task
 dmon stop app
 
+# Restart a task
+dmon restart app
+
 # Check task status
 dmon status app
 
@@ -103,11 +106,23 @@ dmon status app
 dmon exec app
 ```
 
+You can specify multiple tasks at once, e.g.: `dmon start app1 app2 app3`, except for `dmon exec` which only accepts one task.
+
+Or use `--all` to operate on all tasks:
+
+```sh
+# all configured tasks
+dmon start/stop/restart --all
+# all running tasks
+dmon stop/status --all
+```
+
 If you have defined `default_task`, or only one task is defined in the config file, you can omit the task name:
 
 ```sh
 dmon start
 dmon stop
+dmon restart
 dmon status
 dmon exec
 ```
