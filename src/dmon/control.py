@@ -377,7 +377,7 @@ def restart(
 def status(meta_paths: Sequence[PathType]):
     ret = 0
     metas = []
-    for meta_path in meta_paths:
+    for idx, meta_path in enumerate(meta_paths):
         meta_path = Path(meta_path).resolve()
         meta = DmonMeta.load(meta_path)
         if meta is None:
@@ -393,8 +393,9 @@ def status(meta_paths: Sequence[PathType]):
             ret |= 1
         else:
             print_status(meta)
-            print("---", file=sys.stderr)
             metas.append(meta)
+        if idx < len(meta_paths) - 1:
+            print("---", file=sys.stderr)
     if metas:
         print("\nProcess Tree:", file=sys.stderr)
         print_process_table(metas)
