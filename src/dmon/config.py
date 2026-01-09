@@ -1,6 +1,6 @@
 import sys
 from pathlib import Path
-from typing import Dict, Optional, cast
+from typing import Dict, List, Optional, Sequence, Tuple, Union, cast
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -158,11 +158,13 @@ def validate_task(task, name: str) -> DmonTaskConfig:
     return ret
 
 
-def get_task_config(name: Optional[str], cfg_path: Optional[str]):
+def get_task_config(
+    names: Union[Sequence[str], str, None], cfg_path: Optional[str]
+) -> Tuple[Sequence[str], List[DmonTaskConfig]]:
     """
-    Get the validated task configuration for the given task name.
-    If name is None or empty, and there is only one task, return that task; otherwise, raise ValueError.
-    If the task is not found, or required fields are missing, raise TypeError or ValueError.
+    Get the validated task configurations for the given task names.
+    If no name specified, and there is only one task, return that task; otherwise, raise ValueError.
+    If any task is not found, or required fields are missing, raise TypeError or ValueError.
 
     The config is loaded from the given path, or searched for dmon.yaml or pyproject.toml.
     """
@@ -172,23 +174,36 @@ def get_task_config(name: Optional[str], cfg_path: Optional[str]):
     if not isinstance(tasks, dict):
         raise TypeError("'tasks' must be a table")
 
-    name = name or cfg.get("default_task", None)
+    if names is None:
+        names = []
+    if isinstance(names, str):
+        names = [names]
 
-    if not name:
-        if len(tasks) == 0:
-            raise ValueError(f"No task found in {path}")
-        elif len(tasks) == 1:
-            name = next(iter(tasks))
+    if len(names) == 0:
+        default_task_name = cfg.get("default_task", None)
+        if default_task_name:
+            if not isinstance(default_task_name, str):
+                raise TypeError("'default_task' must be a string")
+            names = [default_task_name]
         else:
-            raise ValueError(f"Multiple tasks found in {path}; please specify one.")
-    else:
+            if len(tasks) == 0:
+                raise ValueError(f"No task found in {path}")
+            elif len(tasks) == 1:
+                name = next(iter(tasks))
+                assert isinstance(name, str)
+                names = [name]
+            else:
+                raise ValueError(f"Multiple tasks found in {path}; please specify one.")
+
+    ret_tasks = []
+    for name in names:
         name = name.lower()
         if name not in tasks:
             raise ValueError(f"Task '{name}' not found in {path}")
 
-    assert isinstance(name, str)
-    task = validate_task(tasks[name], name)
-    return name, task
+        task = validate_task(tasks[name], name)
+        ret_tasks.append(task)
+    return names, ret_tasks
 
 
 def check_name_in_config(name: str) -> bool:

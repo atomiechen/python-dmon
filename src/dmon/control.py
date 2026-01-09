@@ -33,7 +33,17 @@ def ensure_log_dir(log_path: Path):
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
 
-def start(cfg: DmonTaskConfig):
+def start(cfgs: Sequence[DmonTaskConfig]):
+    ret = 0
+    for idx, cfg in enumerate(cfgs):
+        # non-zero if any start() fails
+        ret |= start_single(cfg)
+        if idx < len(cfgs) - 1:
+            print("---", file=sys.stderr)  # print a blank line between tasks
+    return ret
+
+
+def start_single(cfg: DmonTaskConfig):
     meta_path = Path(cfg.meta_path).resolve()
     log_path = Path(cfg.log_path).resolve()
     cwd = Path(cfg.cwd).resolve()
@@ -355,12 +365,13 @@ def terminate_win(proc: psutil.Process, timeout):
 
 
 def restart(
-    cfg: DmonTaskConfig,
+    cfgs: Sequence[DmonTaskConfig],
     timeout=5.0,
 ):
-    stop_single(cfg.meta_path, timeout)
+    meta_paths = [cfg.meta_path for cfg in cfgs]
+    stop(meta_paths, timeout=timeout)
     print("--- Restarting ---", file=sys.stderr)
-    return start(cfg)
+    return start(cfgs)
 
 
 def status(meta_paths: Sequence[PathType]):

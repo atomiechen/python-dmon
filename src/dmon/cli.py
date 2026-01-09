@@ -58,7 +58,7 @@ def main():
     sp_start.add_argument(
         "task",
         help="Configured task name (default: the only task if there's just one)",
-        nargs="?",
+        nargs="*",
     )
     sp_start.add_argument(
         "--meta-file",
@@ -94,7 +94,7 @@ def main():
     sp_restart.add_argument(
         "task",
         help="Configured task name (default: the only task if there's just one)",
-        nargs="?",
+        nargs="*",
     )
     sp_restart.add_argument(
         "--meta-file",
@@ -211,29 +211,39 @@ def main():
     if args.command in ["start", "restart"]:
         sp = sp_start if args.command == "start" else sp_restart
         try:
-            task, task_cfg = get_task_config(args.task, args.config)
+            tasks, task_cfgs = get_task_config(args.task, args.config)
         except Exception as e:
             sp.error(str(e))
 
-        task_cfg.meta_path = (
-            args.meta_file or task_cfg.meta_path or META_PATH_TEMPLATE.format(task=task)
-        )
-        task_cfg.log_path = (
-            args.log_file or task_cfg.log_path or LOG_PATH_TEMPLATE.format(task=task)
-        )
-        task_cfg.rotate_log_path = (
-            task_cfg.rotate_log_path or ROTATE_LOG_PATH_TEMPLATE.format(task=task)
-        )
+        # check if meta_file or log_file path is provided;
+        # if so, only one task should be specified
+        if args.meta_file or args.log_file:
+            if len(tasks) == 1:
+                task_cfgs[0].meta_path = args.meta_file or task_cfgs[0].meta_path
+                task_cfgs[0].log_path = args.log_file or task_cfgs[0].log_path
+            else:
+                sp.error(
+                    "--meta-file and --log-file can only be specified when starting/restarting a single task"
+                )
+        # fill in default values if not provided
+        for task, task_cfg in zip(tasks, task_cfgs):
+            task_cfg.meta_path = task_cfg.meta_path or META_PATH_TEMPLATE.format(
+                task=task
+            )
+            task_cfg.log_path = task_cfg.log_path or LOG_PATH_TEMPLATE.format(task=task)
+            task_cfg.rotate_log_path = (
+                task_cfg.rotate_log_path or ROTATE_LOG_PATH_TEMPLATE.format(task=task)
+            )
         if args.command == "start":
-            sys.exit(start(task_cfg))
+            sys.exit(start(task_cfgs))
         else:
-            sys.exit(restart(task_cfg))
+            sys.exit(restart(task_cfgs))
     elif args.command == "exec":
         try:
-            task, task_cfg = get_task_config(args.task, args.config)
+            _, task_cfgs = get_task_config(args.task, args.config)
         except Exception as e:
             sp_exec.error(str(e))
-        sys.exit(execute(task_cfg))
+        sys.exit(execute(task_cfgs[0]))
     elif args.command in ["stop", "status"]:
         sp = sp_stop if args.command == "stop" else sp_status
         if args.all:
@@ -247,10 +257,9 @@ def main():
                     tasks = args.task
                 else:
                     try:
-                        task, _ = get_task_config(args.task, args.config)
+                        tasks, _ = get_task_config(args.task, args.config)
                     except Exception as e:
                         sp.error(str(e))
-                    tasks = [task]
                 meta_paths = [META_PATH_TEMPLATE.format(task=task) for task in tasks]
         if args.command == "stop":
             sys.exit(stop(meta_paths))
@@ -277,7 +286,7 @@ def main():
             rotate_log_path=args.rotate_log_path
             or ROTATE_LOG_PATH_TEMPLATE.format(task=args.name),
         )
-        sys.exit(start(task_cfg))
+        sys.exit(start([task_cfg]))
     else:
         parser.print_help()
         sys.exit(1)
