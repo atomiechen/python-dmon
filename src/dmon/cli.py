@@ -1,7 +1,6 @@
 import argparse
 from pathlib import Path
 import shlex
-import sys
 
 from colorama import just_fix_windows_console
 
@@ -245,15 +244,15 @@ def main():
                 task_cfg.rotate_log_path or ROTATE_LOG_PATH_TEMPLATE.format(task=task)
             )
         if args.command == "start":
-            sys.exit(start(task_cfgs))
+            sp.exit(start(task_cfgs))
         else:
-            sys.exit(restart(task_cfgs))
+            sp.exit(restart(task_cfgs))
     elif args.command == "exec":
         try:
             _, task_cfgs = get_task_config(args.task, args.config)
         except Exception as e:
             sp_exec.error(str(e))
-        sys.exit(execute(task_cfgs[0]))
+        sp_exec.exit(execute(task_cfgs[0]))
     elif args.command in ["stop", "status"]:
         sp = sp_stop if args.command == "stop" else sp_status
         meta_paths = []
@@ -283,12 +282,12 @@ def main():
         unique_meta_paths = sorted(set(Path(p).resolve() for p in meta_paths))
 
         if args.command == "stop":
-            sys.exit(stop(unique_meta_paths))
+            sp.exit(stop(unique_meta_paths))
         else:
-            sys.exit(status(unique_meta_paths))
+            sp.exit(status(unique_meta_paths))
     elif args.command == "list":
         dir = args.dir or DEFAULT_META_DIR
-        sys.exit(list_processes(dir, args.full))
+        sp_list.exit(list_processes(dir, args.full))
     elif args.command == "run":
         if not args.name:
             sp_run.error("Please provide a non-empty name for the task.")
@@ -307,10 +306,10 @@ def main():
             rotate_log_path=args.rotate_log_path
             or ROTATE_LOG_PATH_TEMPLATE.format(task=args.name),
         )
-        sys.exit(start([task_cfg]))
+        sp_run.exit(start([task_cfg]))
     else:
         parser.print_help()
-        sys.exit(1)
+        parser.exit(1)
 
 
 if __name__ == "__main__":
