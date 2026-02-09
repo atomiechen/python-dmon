@@ -212,7 +212,9 @@ def main():
     # add custom config file option
     for sp in [sp_start, sp_stop, sp_restart, sp_status, sp_exec]:
         sp.add_argument(
+            "-c",
             "--config",
+            metavar="PATH",
             help="Path to config file or the directory containing it (default: search from current directory upwards)",
         )
 
