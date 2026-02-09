@@ -160,7 +160,7 @@ def validate_task(task, name: str) -> DmonTaskConfig:
 
 def get_task_config(
     names: Union[Sequence[str], str, None], cfg_path: Optional[str], all: bool = False
-) -> Tuple[Sequence[str], List[DmonTaskConfig]]:
+) -> Tuple[Sequence[str], List[DmonTaskConfig], Path]:
     """
     Get the validated task configurations for the given task names.
     If 'all' is True, return all tasks.
@@ -203,7 +203,7 @@ def get_task_config(
 
         task = validate_task(tasks[name], name)
         ret_tasks.append(task)
-    return names, ret_tasks
+    return names, ret_tasks, path
 
 
 def check_name_in_config(name: str) -> bool:

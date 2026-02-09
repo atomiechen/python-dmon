@@ -1,4 +1,5 @@
 import argparse
+import os
 from pathlib import Path
 import shlex
 
@@ -220,7 +221,10 @@ def main():
     if args.command in ["start", "restart"]:
         sp = sp_start if args.command == "start" else sp_restart
         try:
-            tasks, task_cfgs = get_task_config(args.task, args.config, args.all)
+            tasks, task_cfgs, cfg_path = get_task_config(
+                args.task, args.config, args.all
+            )
+            os.chdir(cfg_path.parent)
         except Exception as e:
             sp.error(str(e))
 
@@ -249,7 +253,8 @@ def main():
             sp.exit(restart(task_cfgs))
     elif args.command == "exec":
         try:
-            _, task_cfgs = get_task_config(args.task, args.config)
+            _, task_cfgs, cfg_path = get_task_config(args.task, args.config)
+            os.chdir(cfg_path.parent)
         except Exception as e:
             sp_exec.error(str(e))
         sp_exec.exit(execute(task_cfgs[0]))
@@ -273,7 +278,8 @@ def main():
         # If no meta paths collected, use default task
         if len(meta_paths) == 0:
             try:
-                tasks, _ = get_task_config(args.task, args.config)
+                tasks, _, cfg_path = get_task_config(args.task, args.config)
+                os.chdir(cfg_path.parent)
             except Exception as e:
                 sp.error(str(e))
             meta_paths.extend([META_PATH_TEMPLATE.format(task=task) for task in tasks])
