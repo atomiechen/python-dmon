@@ -13,7 +13,7 @@ force = "--force" in sys.argv[1:]
 for stack_meta in meta_dir.glob("*.stack.json"):
     stack = stack_meta.name[: -len(".stack.json")]
     result = subprocess.run(
-        [sys.executable, "-m", "dmon", "down", stack],
+        [sys.executable, "-m", "dmon", "stack", "down", stack],
         cwd=root,
         check=False,
     )

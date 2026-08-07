@@ -59,8 +59,9 @@ output so machine-readable output can be added without breaking terminal use.
   identities it owns. `down` uses a per-run, cross-platform stop request, then
   falls back to those identities if the supervisor has crashed; it must never
   infer ownership from task names or the current configuration.
-- Reserve detached stack metadata atomically. Concurrent `up -d` calls must have
-  exactly one owner, and failed or corrupt metadata remains diagnosable.
+- Reserve detached stack metadata atomically. Concurrent `dmon stack up -d`
+  calls must have exactly one owner, and failed or corrupt metadata remains
+  diagnosable.
 
 ### CLI behavior
 
@@ -70,6 +71,8 @@ output so machine-readable output can be added without breaking terminal use.
 - Child command options work with or without an explicit `--` boundary.
 - Configured task and stack names are case-insensitive; displayed canonical names
   remain stable.
+- Keep stack operations under the `dmon stack` namespace. Individual task
+  operations remain top-level; do not add parallel `--stack` modes.
 - Paths and commands from a config file resolve relative to that file, not the
   caller's current directory. Ad-hoc commands do not require a config file.
 - Render task names consistently in bold cyan; use state-appropriate colors for
@@ -95,6 +98,9 @@ output so machine-readable output can be added without breaking terminal use.
   write logs or metadata, or signal a process. Follow mode must close file
   handles between polls, reopen replaced files after rotation, preserve partial
   lines, and stop cleanly on Ctrl-C.
+- Foreground stack supervision attaches that same read-only follower from the
+  current end of each log. Detached supervision does not attach it. Display
+  setup or runtime failures must never alter stack lifecycle or cleanup.
 
 ### Configuration and readiness
 

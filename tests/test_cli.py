@@ -81,7 +81,7 @@ class CliTest(unittest.TestCase):
                 with patch.object(
                     sys,
                     "argv",
-                    ["dmon", "up", "dev", "-c", str(config_path)],
+                    ["dmon", "stack", "up", "dev", "-c", str(config_path)],
                 ), patch(
                     "dmon.cli.get_stack_config",
                     return_value=("dev", [task], config_path),
@@ -108,7 +108,15 @@ class CliTest(unittest.TestCase):
                 with patch.object(
                     sys,
                     "argv",
-                    ["dmon", "logs", "dev", "--tail", "12", "-f"],
+                    [
+                        "dmon",
+                        "stack",
+                        "logs",
+                        "dev",
+                        "--tail",
+                        "12",
+                        "-f",
+                    ],
                 ), patch(
                     "dmon.cli.get_stack_config",
                     return_value=("dev", [task], config_path),
@@ -127,7 +135,7 @@ class CliTest(unittest.TestCase):
         task = DmonTaskConfig(task="api", cmd=["python", "api.py"])
         config_path = Path.cwd() / "dmon.yaml"
         output = StringIO()
-        with patch.object(sys, "argv", ["dmon", "up", "dev"]), patch(
+        with patch.object(sys, "argv", ["dmon", "stack", "up", "dev"]), patch(
             "dmon.cli.get_stack_config",
             return_value=("dev", [task], config_path),
         ), patch("dmon.cli.up", side_effect=RuntimeError("simulated failure")):

@@ -20,10 +20,13 @@ from .control import (
     ensure_log_dir,
     ensure_meta_dir,
     get_unique_process,
+    print_process_table,
     start_single_result,
     task_environment,
     terminate_process,
 )
+from .constants import STACK_META_SUFFIX
+from .logs import StackLogFollower, start_stack_log_follower
 from .types import (
     CmdType,
     DmonMeta,
@@ -71,9 +74,20 @@ def up(
     state_callback: Optional[StackStateCallback] = None,
     stop_requested: Optional[StopCheck] = None,
     abort_on_exit: bool = False,
+    attach_logs: bool = True,
 ) -> int:
     started: list[tuple[DmonTaskConfig, DmonMeta]] = []
     exit_code = 1
+    log_follower: Optional[StackLogFollower] = None
+
+    if attach_logs:
+        try:
+            log_follower = start_stack_log_follower(configs)
+        except Exception as error:
+            print(
+                f"Stack log display could not start: {error}",
+                file=sys.stderr,
+            )
 
     def terminate(_signum: int, _frame: object) -> None:
         raise KeyboardInterrupt
@@ -125,6 +139,8 @@ def up(
                 cleanup_code = cleanup(started)
             notify_state(state_callback, "stopped", started)
         finally:
+            if log_follower is not None:
+                log_follower.stop()
             signal.signal(signal.SIGINT, previous_int)
             signal.signal(signal.SIGTERM, previous_term)
     if cleanup_code:
@@ -359,14 +375,18 @@ def start_detached_stack(
     if existing is not None:
         if stack_process(existing) is not None or stack_tasks_running(existing):
             print(
-                stack_message(stack, " is already active; run 'dmon down'.", "red"),
+                stack_message(
+                    stack,
+                    " is already active; run 'dmon stack down'.",
+                    "red",
+                ),
                 file=sys.stderr,
             )
         else:
             print(
                 stack_message(
                     stack,
-                    " has stale metadata; run 'dmon down' before starting it again.",
+                    " has stale metadata; run 'dmon stack down' before starting it again.",
                     "red",
                 ),
                 file=sys.stderr,
@@ -588,6 +608,7 @@ def run_detached_stack(meta_path: Path, run_id: str, poll_interval: float = 0.5)
             state_callback=persist,
             stop_requested=lambda: stack_stop_requested(stop_path, meta.run_id),
             abort_on_exit=meta.abort_on_exit,
+            attach_logs=False,
         )
     except Exception as error:
         try:
@@ -718,7 +739,7 @@ def status_detached_stack(meta_path: Path) -> int:
             f"Detached stack metadata not found: {meta_path.resolve()}", file=sys.stderr
         )
         return 1
-    print_stack_status(meta)
+    print_stack_status(meta, show_tasks=True)
     supervisor_running = stack_process(meta) is not None
     tasks_running = all(
         check_running(task.pid, task.create_time) for task in meta.tasks
@@ -726,7 +747,7 @@ def status_detached_stack(meta_path: Path) -> int:
     return 0 if meta.state == "running" and supervisor_running and tasks_running else 1
 
 
-def print_stack_status(meta: DmonStackMeta) -> None:
+def stack_status(meta: DmonStackMeta) -> tuple[str, int]:
     supervisor_running = stack_process(meta) is not None
     running_tasks = sum(
         1 for task in meta.tasks if check_running(task.pid, task.create_time)
@@ -739,12 +760,21 @@ def print_stack_status(meta: DmonStackMeta) -> None:
         status = "Running" if running_tasks == len(meta.tasks) else "Degraded"
     else:
         status = meta.state.capitalize()
-    status_color = {
+    return status, running_tasks
+
+
+def stack_status_color(status: str) -> str:
+    return {
         "Running": "green",
         "Starting": "yellow",
         "Stopping": "yellow",
         "Exited": "yellow",
     }.get(status, "red")
+
+
+def print_stack_status(meta: DmonStackMeta, *, show_tasks: bool = False) -> None:
+    status, running_tasks = stack_status(meta)
+    status_color = stack_status_color(status)
     print(f"STACK      : {stack_table_value(meta.stack)}", file=sys.stderr)
     print(
         "STATUS     : " + colored(status, color=status_color, attrs=["bold"]),
@@ -761,3 +791,87 @@ def print_stack_status(meta: DmonStackMeta) -> None:
     print(f"LOG        : {meta.log_path}", file=sys.stderr)
     if meta.error:
         print(f"ERROR      : {meta.error}", file=sys.stderr)
+    if show_tasks and meta.tasks:
+        print("\nTask Processes:", file=sys.stderr)
+        print_process_table(stack_task_metas(meta))
+
+
+def stack_task_metas(meta: DmonStackMeta) -> list[DmonMeta]:
+    metas = []
+    for task in meta.tasks:
+        current = None
+        try:
+            current = DmonMeta.load(task.meta_path)
+        except (OSError, ValueError, TypeError):
+            pass
+        if current is not None and (
+            current.pid != task.pid
+            or abs(current.create_time - task.create_time) >= 1e-3
+        ):
+            current = None
+        metas.append(
+            current
+            or DmonMeta(
+                task=task.task,
+                pid=task.pid,
+                create_time=task.create_time,
+                meta_path=task.meta_path,
+            )
+        )
+    return metas
+
+
+def list_detached_stacks(meta_dir: Path) -> int:
+    target = meta_dir.resolve()
+    metas = []
+    errors = 0
+    if target.is_dir():
+        for meta_path in sorted(target.glob(f"*{STACK_META_SUFFIX}")):
+            try:
+                meta = DmonStackMeta.load(meta_path)
+            except (OSError, ValueError, TypeError) as error:
+                print(
+                    f"Cannot read stack metadata {meta_path}: {error}",
+                    file=sys.stderr,
+                )
+                errors += 1
+                continue
+            if meta is not None:
+                metas.append(meta)
+
+    rows = []
+    for meta in metas:
+        status, running = stack_status(meta)
+        rows.append(
+            (
+                meta.stack,
+                status,
+                str(meta.pid),
+                f"{running}/{len(meta.tasks)}",
+                "abort-on-exit" if meta.abort_on_exit else "keep-running",
+            )
+        )
+    headers = ("STACK", "STATUS", "SUPERVISOR", "TASKS", "EXIT POLICY")
+    widths = [
+        max([len(headers[index]), *(len(row[index]) for row in rows)])
+        for index in range(len(headers))
+    ]
+    print(
+        "  ".join(f"{value:<{widths[index]}}" for index, value in enumerate(headers)),
+        file=sys.stderr,
+    )
+    for stack, status, supervisor, tasks, policy in rows:
+        status_color = stack_status_color(status)
+        values = (
+            colored(f"{stack:<{widths[0]}}", "cyan", attrs=["bold"]),
+            colored(f"{status:<{widths[1]}}", status_color, attrs=["bold"]),
+            f"{supervisor:<{widths[2]}}",
+            f"{tasks:<{widths[3]}}",
+            f"{policy:<{widths[4]}}",
+        )
+        print("  ".join(values), file=sys.stderr)
+    print(
+        f"\nFound {len(metas)} stack{'s' if len(metas) != 1 else ''} in {target}",
+        file=sys.stderr,
+    )
+    return 1 if errors else 0

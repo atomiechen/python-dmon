@@ -148,19 +148,21 @@ No config is required. Child options work without `--`; adding it remains valid.
 ### Healthy startup and Ctrl-C cleanup
 
 ```sh
-dmon up healthy
+dmon stack up healthy
 ```
 
 Wait for every task to report ready, then press Ctrl-C. Tasks must stop in reverse
 dependency order and leave no metadata. Output should distinguish readiness,
-runtime logs, shutdown, and errors without relying only on color.
+runtime logs, shutdown, and errors without relying only on color. New task output
+must appear automatically with a task-name prefix; no second `logs -f` command
+should be needed.
 
 Repeat once with two terminals. The `exec` keeps the printed shell PID when it
 becomes `dmon`, so there is no process-search ambiguity:
 
 ```sh
 # Terminal 1
-sh -c 'echo "dmon up PID=$$"; exec dmon up healthy'
+sh -c 'echo "dmon stack up PID=$$"; exec dmon stack up healthy'
 
 # Terminal 2: replace 12345 with the PID printed above
 kill -TERM 12345
@@ -172,7 +174,7 @@ the foreground supervisor; detached supervision is tested separately below.
 ### Startup rollback
 
 ```sh
-dmon up startup-failure; echo "exit=$?"
+dmon stack up startup-failure; echo "exit=$?"
 dmon status stack-db; echo "exit=$?"
 ```
 
@@ -182,7 +184,7 @@ must be stopped and have no live metadata.
 ### Runtime degradation and fail-fast cleanup
 
 ```sh
-dmon up runtime-failure
+dmon stack up runtime-failure
 dmon status stack-db; echo "exit=$?"
 ```
 
@@ -191,7 +193,7 @@ supervisor must report degradation while `stack-db` keeps running. Press Ctrl-C;
 the remaining task and metadata must then be cleaned.
 
 ```sh
-dmon up --abort-on-exit runtime-failure; echo "exit=$?"
+dmon stack up --abort-on-exit runtime-failure; echo "exit=$?"
 dmon status stack-db; echo "exit=$?"
 ```
 
@@ -201,7 +203,7 @@ remaining task automatically.
 ### Readiness timeout
 
 ```sh
-dmon up readiness-timeout; echo "exit=$?"
+dmon stack up readiness-timeout; echo "exit=$?"
 dmon status never-ready; echo "exit=$?"
 ```
 
@@ -211,26 +213,28 @@ actionable timeout, return non-zero, and stop the task without stale metadata.
 ### Detached lifecycle and recovery
 
 ```sh
-dmon up -d healthy
-dmon status --stack healthy
-dmon up -d healthy; echo "duplicate_exit=$?"
-dmon restart --stack healthy
-dmon down healthy
-dmon status --stack healthy; echo "status_exit=$?"
+dmon stack up -d healthy
+dmon stack status healthy
+dmon stack list
+dmon stack up -d healthy; echo "duplicate_exit=$?"
+dmon stack restart healthy
+dmon stack down healthy
+dmon stack status healthy; echo "status_exit=$?"
 ```
 
 Startup waits for readiness before returning. Status must show one supervisor
-and all three tasks running; the duplicate start must fail without disturbing
-them. `down` must stop tasks in reverse order and remove stack and task metadata.
-Restart must replace the supervisor and leave the stack healthy.
+and all three member tasks, including their individual states and process trees;
+the list must include the stack summary. The duplicate start must fail without
+disturbing them. `down` must stop tasks in reverse order and remove stack and
+task metadata. Restart must replace the supervisor and leave the stack healthy.
 
 Test degraded detached behavior:
 
 ```sh
-dmon up -d runtime-failure
+dmon stack up -d runtime-failure
 sleep 2
-dmon status --stack runtime-failure; echo "status_exit=$?"
-dmon down runtime-failure
+dmon stack status runtime-failure; echo "status_exit=$?"
+dmon stack down runtime-failure
 ```
 
 Status must be `Degraded`, return non-zero, and show `stack-db` still running.
@@ -238,20 +242,20 @@ Status must be `Degraded`, return non-zero, and show `stack-db` still running.
 ### Read-only stack logs
 
 ```sh
-dmon up -d healthy
-dmon logs --tail 2 healthy
-dmon logs --tail 0 -f healthy
+dmon stack up -d healthy
+dmon stack logs --tail 2 healthy
+dmon stack logs --tail 0 -f healthy
 ```
 
 The snapshot and follow output must prefix every line with its task name. Press
-Ctrl-C while following, then run `dmon status --stack healthy`: the same
-supervisor and tasks must still be running. Finish with `dmon down healthy`.
+Ctrl-C while following, then run `dmon stack status healthy`: the same
+supervisor and tasks must still be running. Finish with `dmon stack down healthy`.
 
 Test supervisor-crash recovery once on each operating system:
 
 ```sh
-dmon up -d healthy
-dmon status --stack healthy  # note the SUPERVISOR PID
+dmon stack up -d healthy
+dmon stack status healthy  # note the SUPERVISOR PID
 
 # Terminate that PID without allowing graceful cleanup. POSIX:
 kill -KILL 12345
@@ -259,8 +263,8 @@ kill -KILL 12345
 # PowerShell:
 Stop-Process -Id 12345 -Force
 
-dmon status --stack healthy; echo "status_exit=$?"
-dmon down healthy
+dmon stack status healthy; echo "status_exit=$?"
+dmon stack down healthy
 ```
 
 Replace `12345` with the displayed PID. Status should report an orphaned stack,

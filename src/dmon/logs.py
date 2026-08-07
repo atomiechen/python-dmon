@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 import sys
+import threading
 import time
 from typing import BinaryIO, Callable, Optional, Sequence, TextIO, Tuple
 
@@ -25,6 +26,16 @@ class LogCursor:
     pending: bytes = b""
 
 
+@dataclass
+class StackLogFollower:
+    stop_event: threading.Event
+    thread: threading.Thread
+
+    def stop(self, timeout: float = 1.0) -> None:
+        self.stop_event.set()
+        self.thread.join(timeout)
+
+
 def show_stack_logs(
     configs: Sequence[DmonTaskConfig],
     *,
@@ -34,6 +45,7 @@ def show_stack_logs(
     stop_requested: Optional[StopCheck] = None,
     stdout: Optional[TextIO] = None,
     stderr: Optional[TextIO] = None,
+    warn_missing: bool = True,
 ) -> int:
     output = stdout or sys.stdout
     errors = stderr or sys.stderr
@@ -41,7 +53,7 @@ def show_stack_logs(
     width = max((len(cursor.task) for cursor in cursors), default=0)
 
     for cursor in cursors:
-        segments = read_tail(cursor, tail, errors)
+        segments = read_tail(cursor, tail, errors, warn_missing=warn_missing)
         if follow and segments and not line_is_complete(segments[-1]):
             cursor.pending = segments.pop()
         emit_segments(cursor.task, segments, width, output)
@@ -68,13 +80,53 @@ def show_stack_logs(
     return 0
 
 
-def read_tail(cursor: LogCursor, count: int, errors: TextIO) -> list[bytes]:
+def start_stack_log_follower(
+    configs: Sequence[DmonTaskConfig],
+    *,
+    poll_interval: float = 0.2,
+    stdout: Optional[TextIO] = None,
+    stderr: Optional[TextIO] = None,
+) -> StackLogFollower:
+    stop_event = threading.Event()
+    errors = stderr or sys.stderr
+
+    def follow() -> None:
+        try:
+            show_stack_logs(
+                configs,
+                tail=0,
+                follow=True,
+                poll_interval=poll_interval,
+                stop_requested=stop_event.is_set,
+                stdout=stdout,
+                stderr=errors,
+                warn_missing=False,
+            )
+        except Exception as error:
+            print(
+                f"Stack log display stopped unexpectedly: {error}",
+                file=errors,
+            )
+
+    thread = threading.Thread(target=follow, name="dmon-stack-logs", daemon=True)
+    thread.start()
+    return StackLogFollower(stop_event, thread)
+
+
+def read_tail(
+    cursor: LogCursor,
+    count: int,
+    errors: TextIO,
+    *,
+    warn_missing: bool = True,
+) -> list[bytes]:
     try:
         with cursor.path.open("rb") as stream:
             stat = os.fstat(stream.fileno())
             segments, end = tail_segments(stream, count)
     except FileNotFoundError:
-        print(f"Log not found for task '{cursor.task}': {cursor.path}", file=errors)
+        if warn_missing:
+            print(f"Log not found for task '{cursor.task}': {cursor.path}", file=errors)
         return []
     except OSError as error:
         print(f"Cannot read log for task '{cursor.task}': {error}", file=errors)

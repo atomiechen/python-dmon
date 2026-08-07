@@ -9,11 +9,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- Add `dmon up` for supervised stacks with dependency ordering, readiness probes, runtime degradation reporting, optional fail-fast behavior, and automatic cleanup.
+- Add `dmon stack up` for supervised stacks with dependency ordering, readiness probes, attached foreground logs, runtime degradation reporting, optional fail-fast behavior, and automatic cleanup.
 - Add HTTP, TCP, and command readiness probes.
-- Add detached stack supervision with `dmon up -d`, `dmon status --stack`, and `dmon down`.
-- Add detached stack restart with `dmon restart --stack`.
-- Add read-only stack log snapshots and following with `dmon logs` and `dmon logs -f`.
+- Add detached stack supervision with `dmon stack up -d`, detailed status and listing, and `dmon stack down`.
+- Add detached stack restart with `dmon stack restart`.
+- Add read-only stack log snapshots and following with `dmon stack logs` and `dmon stack logs -f`.
 
 
 ## [0.3.1] - 2026-08-07

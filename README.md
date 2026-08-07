@@ -22,7 +22,7 @@ It is a Python-based and more powerful successor to the [handy-backend shell scr
 - 🔗 **Supervised stacks:** Start dependent tasks in order, wait for HTTP, TCP,
   or command readiness, and report runtime degradation.
 - 🌙 **Foreground or detached:** Keep a stack attached for development, or run
-  it under a recoverable background supervisor with `up -d` and `down`.
+  it under a recoverable background supervisor with `stack up -d` and `stack down`.
 - 🪵 **Logging & log rotation:** Keep active log files manageable, with optional archive retention limits.
 
 ![dmon-demo-gif](https://github.com/user-attachments/assets/9bae2f46-5ef4-4784-aced-18d573204efc)
@@ -142,43 +142,47 @@ default_stack: dev
 ```
 
 ```sh
-dmon up dev
+dmon stack up dev
 # Or omit the name when default_stack (or only one stack) is configured
-dmon up
+dmon stack up
 
 # Keep the supervised stack running in the background
-dmon up -d dev
-dmon status --stack dev
-dmon restart --stack dev
-dmon logs --tail 100 dev
-dmon logs -f dev
-dmon down dev
+dmon stack up -d dev
+dmon stack status dev
+dmon stack restart dev
+dmon stack logs --tail 100 dev
+dmon stack logs -f dev
+dmon stack list
+dmon stack down dev
 
 # Optional fail-fast policy for foreground or detached stacks
-dmon up --abort-on-exit dev
+dmon stack up --abort-on-exit dev
 ```
 
-`dmon up` starts dependencies in order and waits for each task's optional
+`dmon stack up` starts dependencies in order and waits for each task's optional
 readiness probe. A startup failure or readiness timeout rolls back every task
 started by that invocation. After startup, an exited task marks the stack as
 degraded while unrelated tasks continue running, matching Docker Compose's
 default behavior. Use `--abort-on-exit` when the whole stack should stop after
-any runtime exit. Ctrl-C, SIGTERM, and `dmon down` always clean up the tasks
-started by the stack in reverse order.
+any runtime exit. Ctrl-C, SIGTERM, and `dmon stack down` always clean up the
+tasks started by the stack in reverse order.
 
-Task output remains in each task's configured `log_path`. `dmon logs` reads the
-latest 100 lines per task by default; `--tail` changes that count and `-f`
-follows new output with a task-name prefix. It never combines or modifies the
-underlying files and never controls running processes. Docker Compose is still
-appropriate when container behavior itself must be tested.
+Foreground `dmon stack up` displays new task output with task-name prefixes,
+while retaining it in each task's configured `log_path`. Detached mode does not
+attach output. `dmon stack logs` reads the latest 100 lines per task by default;
+`--tail` changes that count and `-f` follows new output. Log viewing never
+modifies the underlying files and never controls running processes. Docker
+Compose is still appropriate when container behavior itself must be tested.
 
 Detached mode waits for the same startup and readiness checks before returning.
-A lightweight background supervisor keeps monitoring the stack; `dmon down`
+A lightweight background supervisor keeps monitoring the stack; `dmon stack down`
 requests the same graceful reverse-order cleanup on every platform. If that
 supervisor is killed, its persisted ownership metadata lets `down` recover and
 clean the tasks it started. Supervisor diagnostics are written to
-`logs/<stack>.stack.log`. `dmon restart --stack` performs a clean `down` followed
-by a detached `up` and preserves the stack's exit policy.
+`logs/<stack>.stack.log`. `dmon stack status` includes every owned task and its
+process tree; `dmon stack list` summarizes all recorded stacks. `dmon stack
+restart` performs a clean `down` followed by a detached `up` and preserves the
+stack's exit policy.
 
 Or use `--all` to operate on all tasks:
 
@@ -280,7 +284,7 @@ tasks:
     rotate_log_max_size: 5  # max rotation log file size in MB
     # rotate_log_backup_count: 10  # optional; omit to retain all runner log archives
     meta_path: ".dmon/<task>.meta.json"  # path to meta file
-    depends_on: [another_task]  # dependency order used by `dmon up`
+    depends_on: [another_task]  # dependency order used by `dmon stack up`
     ready:  # optional; exactly one of http, tcp, or command
       command: [python, healthcheck.py]
       timeout: 30  # total seconds to wait (default: 30)
@@ -317,17 +321,18 @@ updates replace the JSON atomically; a per-run ID isolates stop requests, while
 PID plus creation time prevents a recycled PID from being mistaken for the
 original process.
 
-`dmon down` normally asks the supervisor to stop tasks in reverse order. If the
-supervisor has crashed, it uses the persisted process identities to recover the
-orphaned stack without inferring ownership from current configuration. Existing
-or unreadable stack metadata is preserved rather than overwritten; use
-`dmon down` for stale, readable state. **Do not** edit or delete `.dmon` files
-manually.
+`dmon stack down` normally asks the supervisor to stop tasks in reverse order.
+If the supervisor has crashed, it uses the persisted process identities to
+recover the orphaned stack without inferring ownership from current
+configuration. Existing or unreadable stack metadata is preserved rather than
+overwritten; use `dmon stack down` for stale, readable state. **Do not** edit or
+delete `.dmon` files manually.
 
 The log viewer is deliberately separate from process control. It opens task log
 files only while reading, closes them before waiting for more output, and uses
-file identity to reopen a replacement after rotation. Stopping `dmon logs -f`
-cannot stop or restart a task or stack.
+file identity to reopen a replacement after rotation. Stopping `dmon stack logs
+-f` cannot stop or restart a task or stack. The same read-only component powers
+foreground log attachment; a display failure does not change stack lifecycle.
 
 `dmon status` returns a non-zero status if a recorded task has exited. Starting
 that task again removes its stale metadata automatically. `dmon stop` terminates

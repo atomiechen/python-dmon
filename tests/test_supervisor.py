@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import StringIO
 from pathlib import Path
@@ -53,6 +53,68 @@ class SupervisorTest(unittest.TestCase):
         while time.monotonic() < deadline and check_running(meta.pid, meta.create_time):
             time.sleep(0.05)
         self.assertFalse(check_running(meta.pid, meta.create_time))
+
+    def test_foreground_up_attaches_new_task_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            task = self.make_config(
+                root,
+                "service",
+                [
+                    sys.executable,
+                    "-u",
+                    "-c",
+                    "import time; print('visible output'); time.sleep(0.5)",
+                ],
+            )
+            output = StringIO()
+            with redirect_stdout(output), redirect_stderr(StringIO()):
+                self.assertEqual(up([task], poll_interval=0.05), 1)
+
+            self.assertIn("[service] visible output", output.getvalue())
+            self.assert_not_running(task)
+
+    def test_log_display_failure_does_not_change_stack_lifecycle(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            task = self.make_config(
+                root,
+                "service",
+                [sys.executable, "-c", "import time; time.sleep(60)"],
+            )
+            diagnostics = StringIO()
+            with patch(
+                "dmon.supervisor.start_stack_log_follower",
+                side_effect=RuntimeError("display unavailable"),
+            ), patch("dmon.supervisor.monitor", return_value=0), redirect_stderr(
+                diagnostics
+            ):
+                self.assertEqual(up([task], poll_interval=0.05), 0)
+
+            self.assertIn("display unavailable", diagnostics.getvalue())
+            self.assert_not_running(task)
+
+    def test_log_follower_runtime_failure_does_not_change_stack_lifecycle(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            task = self.make_config(
+                root,
+                "service",
+                [sys.executable, "-c", "import time; time.sleep(60)"],
+            )
+            diagnostics = StringIO()
+            with patch(
+                "dmon.logs.show_stack_logs",
+                side_effect=RuntimeError("display interrupted"),
+            ), patch("dmon.supervisor.monitor", return_value=0), redirect_stderr(
+                diagnostics
+            ):
+                self.assertEqual(up([task], poll_interval=0.05), 0)
+
+            self.assertIn("display interrupted", diagnostics.getvalue())
+            self.assert_not_running(task)
 
     def test_start_failure_rolls_back_tasks_started_by_up(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
