@@ -23,6 +23,7 @@ validation and CI to detect an out-of-date lockfile.
 - `config.py` loads, normalizes, and validates YAML/TOML configuration.
 - `control.py` owns individual task lifecycle and process metadata.
 - `logs.py` reads and follows task logs without importing process control.
+- `readiness.py` owns probe execution and monotonic wait/deadline behavior.
 - `runner.py` captures task output and rotates logs.
 - `results.py` contains immutable task and stack snapshots shared by human,
   Python, and machine-readable interfaces.

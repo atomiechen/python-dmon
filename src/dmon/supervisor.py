@@ -3,12 +3,10 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import signal
-import socket
 import subprocess
 import sys
 import time
 from typing import Callable, Optional, Sequence, Tuple
-from urllib.request import urlopen
 import uuid
 
 import psutil
@@ -28,9 +26,14 @@ from .control import (
 )
 from .constants import STACK_META_SUFFIX
 from .logs import StackLogFollower, start_stack_log_follower
+from .readiness import (
+    probe,
+    process_stabilization_spec,
+    ready_spec,
+    wait_for_readiness,
+)
 from .results import StackSnapshot
 from .types import (
-    CmdType,
     DmonMeta,
     DmonStackMeta,
     DmonStackTask,
@@ -258,83 +261,45 @@ def wait_ready(
     meta: DmonMeta,
     stop_requested: Optional[StopCheck] = None,
 ) -> bool:
-    ready = config.ready
-    timeout = float(ready.get("timeout", 30.0)) if ready else 0.2
-    interval = float(ready.get("interval", 0.2)) if ready else 0.05
-    deadline = time.monotonic() + timeout
-    while True:
-        if stop_requested is not None and stop_requested():
-            return False
-        if not check_running(meta.pid, meta.create_time):
-            print(
-                task_message(
-                    config.task,
-                    " exited before becoming ready.",
-                    "red",
-                ),
-                file=sys.stderr,
-            )
-            return False
-        remaining = max(0.0, deadline - time.monotonic())
-        if remaining == 0:
-            if not ready:
-                return True
-            print(
-                task_message(
-                    config.task,
-                    f" did not become ready within {timeout:g} seconds.",
-                    "red",
-                ),
-                file=sys.stderr,
-            )
-            return False
-        probe_timeout = min(max(1.0, interval), remaining)
-        if ready and readiness_probe(config, ready, probe_timeout):
+    spec = ready_spec(config.ready) if config.ready else process_stabilization_spec()
+    result = wait_for_readiness(
+        config.task,
+        spec,
+        cwd=str(Path(config.cwd).resolve()),
+        env=task_environment(config),
+        process_running=lambda: check_running(meta.pid, meta.create_time),
+        stop_requested=stop_requested,
+    )
+    if result.ready:
+        if config.ready:
             print(task_message(config.task, " is ready.", "green"), file=sys.stderr)
-            return True
-        time.sleep(min(interval, max(0.0, deadline - time.monotonic())))
+        return True
+    if result.reason == "process-exited":
+        print(
+            task_message(config.task, " exited before becoming ready.", "red"),
+            file=sys.stderr,
+        )
+    elif result.reason == "timeout":
+        print(
+            task_message(
+                config.task,
+                f" did not become ready within {spec.timeout:g} seconds.",
+                "red",
+            ),
+            file=sys.stderr,
+        )
+    return False
 
 
 def readiness_probe(
     config: DmonTaskConfig, ready: dict[str, object], timeout: float
 ) -> bool:
-    try:
-        if "http" in ready:
-            with urlopen(str(ready["http"]), timeout=max(0.01, timeout)) as response:
-                return 200 <= response.status < 400
-        if "tcp" in ready:
-            tcp = ready["tcp"]
-            assert isinstance(tcp, dict)
-            with socket.create_connection(
-                (str(tcp["host"]), int(tcp["port"])),
-                timeout=max(0.01, timeout),
-            ):
-                return True
-        command = ready["command"]
-        assert isinstance(command, (str, list))
-        return run_probe_command(config, command, timeout) == 0
-    except (OSError, ValueError, subprocess.SubprocessError):
-        return False
-
-
-def run_probe_command(config: DmonTaskConfig, command: CmdType, timeout: float) -> int:
-    if isinstance(command, str):
-        prepared = command
-        shell = True
-    else:
-        prepared = command
-        shell = False
-    result = subprocess.run(
-        prepared,
+    return probe(
+        ready_spec(ready),
         cwd=Path(config.cwd).resolve(),
         env=task_environment(config),
-        shell=shell,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        timeout=max(0.01, timeout),
-        check=False,
+        timeout=timeout,
     )
-    return result.returncode
 
 
 def stack_stop_path(meta_path: Path) -> Path:

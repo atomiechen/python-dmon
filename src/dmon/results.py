@@ -99,3 +99,13 @@ class BatchResult:
     @property
     def exit_code(self) -> int:
         return 0 if self.ok else 1
+
+
+@dataclass(frozen=True)
+class WaitResult:
+    target: str
+    ready: bool
+    reason: str
+    elapsed: float
+    attempts: int
+    error: str = ""
