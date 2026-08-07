@@ -35,11 +35,21 @@ def ensure_log_dir(log_path: Path):
 
 def start(cfgs: Sequence[DmonTaskConfig]):
     ret = 0
+    failed = []
     for idx, cfg in enumerate(cfgs):
-        # non-zero if any start() fails
-        ret |= start_single(cfg)
+        result = start_single(cfg)
+        ret |= result
+        if result:
+            failed.append(cfg.task)
         if idx < len(cfgs) - 1:
             print("---", file=sys.stderr)  # print a blank line between tasks
+    if failed and len(cfgs) > 1:
+        succeeded = len(cfgs) - len(failed)
+        print(
+            f"\nStarted {succeeded} task(s); failed to start: {', '.join(failed)}. "
+            "Multi-task start is best-effort, so successful tasks were left running.",
+            file=sys.stderr,
+        )
     return ret
 
 
@@ -49,47 +59,76 @@ def start_single(cfg: DmonTaskConfig):
     cwd = Path(cfg.cwd).resolve()
 
     try:
-        ret_meta = DmonMeta.load(meta_path)
-    except Exception:
-        ret_meta = None
-    if ret_meta:
+        existing_meta = DmonMeta.load(meta_path)
+    except (OSError, ValueError, TypeError) as error:
+        print(
+            colored(
+                f"Start failed: cannot read metadata {meta_path}: {error}",
+                color="red",
+                attrs=["bold"],
+            ),
+            file=sys.stderr,
+        )
+        return 1
+    if existing_meta and existing_meta.state == "starting":
+        print(
+            colored(
+                f"Start failed: task '{cfg.task}' is already being started by another dmon process.",
+                color="red",
+                attrs=["bold"],
+            ),
+            file=sys.stderr,
+        )
+        print(
+            "If the earlier start was interrupted, run 'dmon stop' to remove its reservation.",
+            file=sys.stderr,
+        )
+        return 1
+    if existing_meta and check_running(existing_meta.pid, existing_meta.create_time):
         print(
             f"{colored('Start failed: meta file already exists', color='red', attrs=['bold'])}",
             file=sys.stderr,
         )
-        print_status(ret_meta)
+        print_status(existing_meta)
         print(
             "\nRun 'dmon status' / 'dmon list' to check, or 'dmon stop' to stop it.",
             file=sys.stderr,
         )
         return 1
+    if existing_meta:
+        print(
+            colored(
+                f"Removing stale metadata for exited task '{cfg.task}'.",
+                color="yellow",
+            ),
+            file=sys.stderr,
+        )
+        meta_path.unlink(missing_ok=True)
 
     ensure_meta_dir(meta_path)
     ensure_log_dir(log_path)
 
-    env = None  # default behavior of Popen
-    if cfg.override_env:
-        env = cfg.env
-    elif cfg.env:
-        env = {**os.environ, **cfg.env}
+    env = task_environment(cfg)
 
     shell = isinstance(cfg.cmd, str)
 
     # Platform-specific parameters to run the process in background detached from parent
     kwargs = {}
+    command = cfg.cmd
     if ON_WINDOWS:
         # DETACHED_PROCESS = 0x00000008
         CREATE_NO_WINDOW = 0x08000000
         kwargs["creationflags"] = CREATE_NO_WINDOW
-        if isinstance(cfg.cmd, list) and len(cfg.cmd) > 0:
+        if isinstance(command, list) and len(command) > 0:
             # On Windows, use full path for the executable when shell=False
-            cfg.cmd[0] = shutil.which(cfg.cmd[0]) or cfg.cmd[0]
+            command = [shutil.which(command[0]) or command[0], *command[1:]]
     else:
         # Make the child process independent of the parent process in Unix-like systems
         kwargs["start_new_session"] = True
 
     meta = DmonMeta(
         task=cfg.task,
+        state="starting",
         meta_path=str(meta_path),
         log_path=str(log_path),
         log_rotate=cfg.log_rotate,
@@ -101,63 +140,89 @@ def start_single(cfg: DmonTaskConfig):
         popen_kwargs=kwargs,
     )
 
-    if cfg.log_rotate:
-        rotate_log_path = Path(cfg.rotate_log_path).resolve()
-
-        meta.rotate_log_path = str(rotate_log_path)
-        meta.log_max_size = cfg.log_max_size
-        meta.rotate_log_max_size = cfg.rotate_log_max_size
-
-        ensure_log_dir(rotate_log_path)
-
-        # use runner to start user process and handle log rotation
-        if isinstance(cfg.cmd, str):
-            # when cmd is str, we need to split it into list for subprocess
-            cmd = shlex.split(cfg.cmd)
-        else:
-            cmd = cfg.cmd
-        args = [
-            sys.executable,
-            "-m",
-            "dmon.runner",
-            "--log-path",
-            str(log_path),
-            "--max-log-size",
-            str(cfg.log_max_size),
-            "--rotate-log-path",
-            str(rotate_log_path),
-            "--max-rotate-log-size",
-            str(cfg.rotate_log_max_size),
-        ]
-        if shell:
-            args.append("--shell")
-        args.append("--")
-        args.extend(cmd)
-        proc = subprocess.Popen(
-            args,
-            cwd=cwd,
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.STDOUT,
-            **kwargs,
+    try:
+        meta.dump(meta_path, exclusive=True)
+    except FileExistsError:
+        print(
+            colored(
+                f"Start failed: another dmon process is starting task '{cfg.task}'.",
+                color="red",
+                attrs=["bold"],
+            ),
+            file=sys.stderr,
         )
-    else:
-        # Open the log file (append binary mode)
-        with open(log_path, "ab", buffering=0) as lof:
-            # Start the child process with stdout/stderr redirected to the log
+        return 1
+
+    try:
+        if cfg.log_rotate:
+            rotate_log_path = Path(cfg.rotate_log_path).resolve()
+
+            meta.rotate_log_path = str(rotate_log_path)
+            meta.log_max_size = cfg.log_max_size
+            meta.rotate_log_max_size = cfg.rotate_log_max_size
+
+            ensure_log_dir(rotate_log_path)
+
+            # use runner to start user process and handle log rotation
+            if isinstance(command, str):
+                # when cmd is str, we need to split it into list for subprocess
+                cmd = shlex.split(command)
+            else:
+                cmd = command
+            args = [
+                sys.executable,
+                "-m",
+                "dmon.runner",
+                "--log-path",
+                str(log_path),
+                "--max-log-size",
+                str(cfg.log_max_size),
+                "--rotate-log-path",
+                str(rotate_log_path),
+                "--max-rotate-log-size",
+                str(cfg.rotate_log_max_size),
+            ]
+            if shell:
+                args.append("--shell")
+            args.append("--")
+            args.extend(cmd)
             proc = subprocess.Popen(
-                cfg.cmd,
-                stdout=lof,
-                stderr=subprocess.STDOUT,
+                args,
                 cwd=cwd,
                 env=env,
-                shell=shell,
-                text=False,  # binary mode
-                bufsize=0,  # unbuffered
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.STDOUT,
                 **kwargs,
             )
+        else:
+            # Open the log file (append binary mode)
+            with open(log_path, "ab", buffering=0) as lof:
+                # Start the child process with stdout/stderr redirected to the log
+                proc = subprocess.Popen(
+                    command,
+                    stdout=lof,
+                    stderr=subprocess.STDOUT,
+                    cwd=cwd,
+                    env=env,
+                    shell=shell,
+                    text=False,  # binary mode
+                    bufsize=0,  # unbuffered
+                    **kwargs,
+                )
+    except OSError as error:
+        meta_path.unlink(missing_ok=True)
+        print(
+            colored(
+                f"Start failed for task '{cfg.task}': {error}",
+                color="red",
+                attrs=["bold"],
+            ),
+            file=sys.stderr,
+        )
+        return 1
 
     meta.pid = proc.pid
+    meta.state = "running"
     try:
         p = psutil.Process(proc.pid)
         create_time = p.create_time()
@@ -166,14 +231,40 @@ def start_single(cfg: DmonTaskConfig):
         )
         meta.create_time = create_time
         meta.create_time_human = create_time_human
-    except psutil.NoSuchProcess:
+    except (psutil.NoSuchProcess, ValueError):
         # process already exited?
         pass
 
-    meta.dump(meta_path)
+    try:
+        meta.dump(meta_path)
+    except OSError as error:
+        try:
+            managed_process = psutil.Process(proc.pid)
+        except psutil.NoSuchProcess:
+            pass
+        else:
+            terminate_process(managed_process, timeout=2.0)
+        meta_path.unlink(missing_ok=True)
+        print(
+            colored(
+                f"Start failed: cannot save metadata for task '{cfg.task}': {error}",
+                color="red",
+                attrs=["bold"],
+            ),
+            file=sys.stderr,
+        )
+        return 1
 
     print_status(meta)
     return 0
+
+
+def task_environment(cfg: DmonTaskConfig):
+    if cfg.override_env:
+        return cfg.env
+    if cfg.env:
+        return {**os.environ, **cfg.env}
+    return None
 
 
 def stop(meta_paths: Sequence[PathType], timeout=5.0):
@@ -191,7 +282,18 @@ def stop_single(
     timeout=5.0,
 ):
     meta_path = Path(meta_path).resolve()
-    meta = DmonMeta.load(meta_path)
+    try:
+        meta = DmonMeta.load(meta_path)
+    except (OSError, ValueError, TypeError) as error:
+        print(
+            colored(
+                f"Stop failed: cannot read metadata {meta_path}: {error}",
+                color="red",
+                attrs=["bold"],
+            ),
+            file=sys.stderr,
+        )
+        return 1
     if meta is None:
         print(
             colored(
@@ -207,7 +309,7 @@ def stop_single(
     pid = meta.pid
     try:
         proc = psutil.Process(pid)
-    except psutil.NoSuchProcess:
+    except (psutil.NoSuchProcess, ValueError):
         print(
             colored(
                 f"Process {pid} not found (already exited); removing stale meta file",
@@ -218,7 +320,7 @@ def stop_single(
         )
         print_status(meta)
         meta_path.unlink(missing_ok=True)
-        return 1
+        return 0
 
     # check if it's the same process by comparing create_time
     if not check_same_process(proc, meta.create_time):
@@ -232,135 +334,132 @@ def stop_single(
         )
         print_status(meta)
         meta_path.unlink(missing_ok=True)
-        return 1
+        return 0
+    if not process_is_alive(proc):
+        print(
+            colored(
+                f"Process {pid} already exited; removing stale meta file",
+                color="yellow",
+                attrs=["bold"],
+            ),
+            file=sys.stderr,
+        )
+        print_status(meta)
+        meta_path.unlink(missing_ok=True)
+        return 0
 
-    if ON_WINDOWS:
-        ret = terminate_win(proc, timeout)
-    else:
-        ret = terminate_posix(proc, timeout)
+    ret = terminate_process(proc, timeout)
     print_status(meta)
     if ret == 0:
         meta_path.unlink(missing_ok=True)
     return ret
 
 
-def terminate_posix(proc: psutil.Process, timeout):
-    # send SIGTERM first for graceful shutdown (if platform supports)
-    proc.terminate()
+def terminate_process(proc: psutil.Process, timeout: float) -> int:
+    if not ON_WINDOWS:
+        try:
+            process_group = os.getpgid(proc.pid)
+        except (ProcessLookupError, psutil.NoSuchProcess):
+            return 0
+        if process_group == proc.pid:
+            return terminate_posix_group(proc, process_group, timeout)
+    return terminate_process_tree(proc, timeout)
 
-    # wait for the process to exit or timeout
+
+def terminate_posix_group(
+    proc: psutil.Process, process_group: int, timeout: float
+) -> int:
     try:
-        ret = proc.wait(timeout)
+        os.killpg(process_group, signal.SIGTERM)
+    except ProcessLookupError:
+        return 0
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline and process_group_exists(process_group):
+        try:
+            proc.wait(timeout=0)
+        except (psutil.NoSuchProcess, psutil.TimeoutExpired):
+            pass
+        time.sleep(0.05)
+    if process_group_exists(process_group):
         print(
             colored(
-                f"Process {proc.pid} exited with code {ret}; removing meta file",
-                color="green",
-                attrs=["bold"],
-            ),
-            file=sys.stderr,
-        )
-    except psutil.TimeoutExpired:
-        print(
-            colored(
-                f"Process {proc.pid} did not exit in time; shutting down child processes",
+                f"Process group {process_group} did not exit in time; killing it",
                 color="yellow",
                 attrs=["bold"],
             ),
             file=sys.stderr,
         )
-
-        # first shut down child processes (leaf nodes first)
-        for child in reversed(proc.children(recursive=True)):
-            try:
-                child.terminate()
-                child.wait(timeout=2)
-            except Exception:
-                try:
-                    child.kill()
-                except Exception:
-                    pass
-        # then shut down the parent process
         try:
-            # check if process is already exited
-            ret = proc.wait(timeout=2)
-            print(
-                colored(
-                    f"Process {proc.pid} exited with code {ret} after terminating children; removing meta file",
-                    color="green",
-                    attrs=["bold"],
-                ),
-                file=sys.stderr,
-            )
-        except psutil.TimeoutExpired:
-            print(
-                colored(
-                    f"Process {proc.pid} did not exit in time after terminating children; killing it",
-                    color="yellow",
-                    attrs=["bold"],
-                ),
-                file=sys.stderr,
-            )
-            try:
-                proc.kill()
-                print(
-                    colored(
-                        f"Killed process {proc.pid}; removing meta file",
-                        color="green",
-                        attrs=["bold"],
-                    ),
-                    file=sys.stderr,
-                )
-            except Exception as e:
-                print(
-                    colored(
-                        f"Failed to kill process {proc.pid}: {e}",
-                        color="red",
-                        attrs=["bold"],
-                    ),
-                    file=sys.stderr,
-                )
+            os.killpg(process_group, signal.SIGKILL)
+        except ProcessLookupError:
+            return 0
+        except PermissionError:
+            if process_group_exists(process_group):
                 return 1
+    try:
+        proc.wait(timeout=1)
+    except (psutil.NoSuchProcess, psutil.TimeoutExpired):
+        pass
+    print(
+        colored(
+            f"Process group {process_group} stopped; removing meta file",
+            color="green",
+            attrs=["bold"],
+        ),
+        file=sys.stderr,
+    )
     return 0
 
 
-def terminate_win(proc: psutil.Process, timeout):
-    # On Windows, we need to stop child processes first
-    children = proc.children(recursive=True)
-    # reverse to kill leaf nodes first
-    for child in reversed(children):
+def process_group_exists(process_group: int) -> bool:
+    for process in psutil.process_iter(["pid", "status"]):
+        if process.info["status"] == psutil.STATUS_ZOMBIE:
+            continue
         try:
-            child.kill()
-            child.wait(timeout=2)
-        except Exception:
-            pass
+            if os.getpgid(process.info["pid"]) == process_group:
+                return True
+        except (OSError, psutil.NoSuchProcess):
+            continue
+    return False
+
+
+def terminate_process_tree(proc: psutil.Process, timeout: float) -> int:
     try:
-        ret = proc.wait(timeout=timeout)
+        processes = [*proc.children(recursive=True), proc]
+    except psutil.NoSuchProcess:
+        return 0
+    for process in reversed(processes):
+        try:
+            process.terminate()
+        except psutil.NoSuchProcess:
+            pass
+    _, alive = psutil.wait_procs(processes, timeout=timeout)
+    for process in alive:
+        try:
+            process.kill()
+        except psutil.NoSuchProcess:
+            pass
+    _, alive = psutil.wait_procs(alive, timeout=1)
+    if alive:
         print(
             colored(
-                f"Process {proc.pid} exited with code {ret}; removing meta file",
-                color="green",
+                "Failed to stop process tree: "
+                + ", ".join(str(process.pid) for process in alive),
+                color="red",
                 attrs=["bold"],
             ),
             file=sys.stderr,
         )
-    except psutil.TimeoutExpired:
-        print(
-            colored(
-                f"Process {proc.pid} did not exit in time after killing children; killing it",
-                color="yellow",
-                attrs=["bold"],
-            ),
-            file=sys.stderr,
-        )
-        proc.kill()
-        print(
-            colored(
-                f"Killed process {proc.pid}; removing meta file",
-                color="green",
-                attrs=["bold"],
-            ),
-            file=sys.stderr,
-        )
+        return 1
+    print(
+        colored(
+            f"Process tree {proc.pid} stopped; removing meta file",
+            color="green",
+            attrs=["bold"],
+        ),
+        file=sys.stderr,
+    )
     return 0
 
 
@@ -379,7 +478,21 @@ def status(meta_paths: Sequence[PathType]):
     metas = []
     for idx, meta_path in enumerate(meta_paths):
         meta_path = Path(meta_path).resolve()
-        meta = DmonMeta.load(meta_path)
+        try:
+            meta = DmonMeta.load(meta_path)
+        except (OSError, ValueError, TypeError) as error:
+            print(
+                colored(
+                    f"Status failed: cannot read metadata {meta_path}: {error}",
+                    color="red",
+                    attrs=["bold"],
+                ),
+                file=sys.stderr,
+            )
+            ret |= 1
+            if idx < len(meta_paths) - 1:
+                print("---", file=sys.stderr)
+            continue
         if meta is None:
             print(
                 colored(
@@ -394,6 +507,8 @@ def status(meta_paths: Sequence[PathType]):
         else:
             print_status(meta)
             metas.append(meta)
+            if not check_running(meta.pid, meta.create_time):
+                ret |= 1
         if idx < len(meta_paths) - 1:
             print("---", file=sys.stderr)
     if metas:
@@ -408,6 +523,13 @@ def check_same_process(proc: psutil.Process, create_time: float) -> bool:
     return abs(proc.create_time() - create_time) < 1e-3
 
 
+def process_is_alive(proc: psutil.Process) -> bool:
+    try:
+        return proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:
+        return False
+
+
 def get_unique_process(pid: int, create_time: float):
     """
     Get the process with given PID and create_time if it is still the same process.
@@ -415,7 +537,7 @@ def get_unique_process(pid: int, create_time: float):
     if create_time >= 0:
         try:
             p = psutil.Process(pid)
-            if check_same_process(p, create_time):
+            if check_same_process(p, create_time) and process_is_alive(p):
                 return p
         except psutil.NoSuchProcess:
             pass
@@ -431,7 +553,7 @@ def check_running(pid: int, create_time: float) -> bool:
         return False
     try:
         p = psutil.Process(pid)
-        return abs(p.create_time() - create_time) < 1e-3
+        return check_same_process(p, create_time) and process_is_alive(p)
     except psutil.NoSuchProcess:
         return False
 
@@ -564,8 +686,21 @@ def list_processes(dir: PathType, full_width: bool):
     target_dmon_dir = Path(dir).resolve()
     meta_paths = get_meta_paths(target_dmon_dir)
     metas = []
+    errors = 0
     for meta_path in meta_paths:
-        meta = DmonMeta.load(meta_path)
+        try:
+            meta = DmonMeta.load(meta_path)
+        except (OSError, ValueError, TypeError) as error:
+            print(
+                colored(
+                    f"Cannot read metadata {meta_path}: {error}",
+                    color="red",
+                    attrs=["bold"],
+                ),
+                file=sys.stderr,
+            )
+            errors += 1
+            continue
         if meta is not None:
             metas.append(meta)
     # sort by name (case-insensitive)
@@ -577,7 +712,7 @@ def list_processes(dir: PathType, full_width: bool):
         f"\nFound {n_task} task{'s' if n_task > 1 else ''} ({n_proc} process{'es' if n_proc > 1 else ''}) in {target_dmon_dir}",
         file=sys.stderr,
     )
-    return 0
+    return 1 if errors else 0
 
 
 def execute(cfg: DmonTaskConfig):

@@ -3,5 +3,5 @@
 set -e
 set -x
 
-ruff check src
-ruff format src --check --diff
+ruff check src tests
+ruff format src tests --check --diff

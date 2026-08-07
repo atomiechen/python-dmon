@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 
 
+## [0.3.1] - Unreleased
+
+### Added
+
+- All paths in the config file are relative to the config file location, and the command will be executed in the config file directory as well. This allows more flexible usage such as running `dmon` from anywhere with `--config` pointing to another directory, or running from a subdirectory, which will search for config file in parent directories.
+- Add `-c` alias of `--config` option for shorter command line usage.
+- Add automated tests on Linux, macOS, and Windows, including Python 3.8 compatibility.
+
+### Fixed
+
+- Stop the complete child process tree instead of leaving descendants running when the parent exits quickly.
+- Report missing executables without a Python traceback and summarize partial multi-task start failures.
+- Reserve and update metadata atomically to prevent concurrent duplicate starts and corrupted partial writes.
+- Treat zombie and exited processes as stopped, return a failing status for exited tasks, and clean stale metadata safely.
+- Resolve explicit `stop` and `status` task metadata relative to the selected config file.
+- Allow ad-hoc `dmon run` outside a directory containing a dmon config file.
+
+
 ## [0.3.0] - 2026-01-09
 
 ### Added

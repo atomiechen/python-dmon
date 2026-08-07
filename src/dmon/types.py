@@ -1,8 +1,10 @@
 from dataclasses import asdict, dataclass, field
 import json
+import os
 from os import PathLike
 from pathlib import Path
 import sys
+import tempfile
 from typing import Dict, List, Optional, Union
 
 
@@ -44,14 +46,45 @@ class DmonTaskConfig:
 @dataclass
 class DmonMeta(DmonTaskConfig):
     pid: int = -1
+    state: str = "running"
     shell: bool = False
     popen_kwargs: Dict = field(default_factory=dict)
     create_time: float = -1
     create_time_human: str = "N/A"
 
-    def dump(self, path: PathType):
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(asdict(self), f, indent=2, ensure_ascii=False)
+    def dump(self, path: PathType, *, exclusive: bool = False):
+        target = Path(path)
+        data = asdict(self)
+        if exclusive:
+            descriptor = os.open(
+                target,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+            )
+            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                json.dump(data, stream, indent=2, ensure_ascii=False)
+                stream.flush()
+                os.fsync(stream.fileno())
+            return
+
+        temporary_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=target.parent,
+                prefix=f".{target.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as stream:
+                temporary_path = Path(stream.name)
+                json.dump(data, stream, indent=2, ensure_ascii=False)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary_path, target)
+        finally:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
 
     @staticmethod
     def load(path: PathType) -> Optional["DmonMeta"]:

@@ -64,6 +64,10 @@ def load_config(cfg_path: Optional[str] = None):
         cfg = cfg.get("tool", {}).get("dmon", {})
     else:
         raise ValueError("Config file must be YAML (.yaml/.yml) or TOML (.toml)")
+    if cfg is None:
+        cfg = {}
+    if not isinstance(cfg, dict):
+        raise TypeError(f"Config in '{path}' must be a table")
     return cfg, path
 
 
@@ -195,6 +199,7 @@ def get_task_config(
             else:
                 raise ValueError(f"Multiple tasks found in {path}; please specify one.")
 
+    ret_names = []
     ret_tasks = []
     for name in names:
         name = name.lower()
@@ -202,8 +207,9 @@ def get_task_config(
             raise ValueError(f"Task '{name}' not found in {path}")
 
         task = validate_task(tasks[name], name)
+        ret_names.append(name)
         ret_tasks.append(task)
-    return names, ret_tasks, path
+    return ret_names, ret_tasks, path
 
 
 def check_name_in_config(name: str) -> bool:
@@ -211,7 +217,10 @@ def check_name_in_config(name: str) -> bool:
     Check if the given task name exists in the tasks.
     Return True if found, False otherwise.
     """
-    cfg, _ = load_config()
+    try:
+        cfg, _ = load_config()
+    except FileNotFoundError:
+        return False
     tasks = cfg.get("tasks", {})
 
     if not isinstance(tasks, dict):

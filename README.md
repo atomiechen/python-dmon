@@ -108,6 +108,11 @@ dmon exec app
 
 You can specify multiple tasks at once, e.g.: `dmon start app1 app2 app3`, except for `dmon exec` which only accepts one task.
 
+Multi-task `start` is best-effort: dmon attempts every requested task and leaves
+successful tasks running if another task cannot start. The command returns a
+non-zero status and prints a summary naming the failed tasks. This is useful for
+independent background services and does not provide atomic stack semantics.
+
 Or use `--all` to operate on all tasks:
 
 ```sh
@@ -127,12 +132,12 @@ dmon status
 dmon exec
 ```
 
-You can use `--config` to specify a custom config file or the directory containing it:
+You can use `-c` / `--config` to specify a custom config file or the directory containing it:
 
 ```sh
 dmon start --config /path/to/dmon.yaml app  # YAML
 dmon start --config /path/to/pyproject.toml app  # or TOML
-dmon start --config /path/to/dir app  # dir with `dmon.y(a)ml` or `pyproject.toml`
+dmon start -c /path/to/dir app  # shorter, dir with `dmon.y(a)ml` or `pyproject.toml`
 ```
 
 And yes, you can use `dmon` to run in a nested manner:
@@ -209,12 +214,18 @@ another_task = "cd subdir && ls && bash start.sh"
 default_task = "your_task_name"
 ```
 
+All paths can be absolute or relative to the **config file location**.
+
 
 ## Under the Hood
 
 Each task is associated with a meta file (e.g. `.dmon/<task>.meta.json`) stored in the current working directory.
 The file contains details such as the command, PID, log path, and more.
 **Do not** modify or delete these files manually.
+
+`dmon status` returns a non-zero status if a recorded task has exited. Starting
+that task again removes its stale metadata automatically. `dmon stop` terminates
+the complete process tree and also cleans stale metadata left by an exited task.
 
 
 ## License

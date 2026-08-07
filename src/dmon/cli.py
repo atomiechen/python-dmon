@@ -5,7 +5,7 @@ import shlex
 
 from colorama import just_fix_windows_console
 
-from .config import check_name_in_config, get_task_config
+from .config import check_name_in_config, get_task_config, load_config
 from .control import (
     execute,
     get_meta_paths,
@@ -264,6 +264,20 @@ def main():
         sp = sp_stop if args.command == "stop" else sp_status
         meta_paths = []
 
+        tasks = args.task
+        if args.task:
+            try:
+                tasks, _, cfg_path = get_task_config(args.task, args.config)
+                os.chdir(cfg_path.parent)
+            except Exception as e:
+                sp.error(str(e))
+        elif args.config:
+            try:
+                _, cfg_path = load_config(args.config)
+                os.chdir(cfg_path.parent)
+            except Exception as e:
+                sp.error(str(e))
+
         # Collect meta paths from --all
         if args.all:
             meta_paths.extend(get_meta_paths(DEFAULT_META_DIR))
@@ -273,8 +287,7 @@ def main():
             meta_paths.append(args.meta_file)
 
         # Collect meta paths from task names
-        if len(args.task) > 0:
-            tasks = args.task
+        if len(tasks) > 0:
             meta_paths.extend([META_PATH_TEMPLATE.format(task=task) for task in tasks])
 
         # If no meta paths collected, use default task
