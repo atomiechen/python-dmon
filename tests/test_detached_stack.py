@@ -58,6 +58,16 @@ class DetachedStackTest(unittest.TestCase):
                 self.assertIn("STACK      : dev", started.stderr)
                 self.assertNotIn("STACK      : 'dev'", started.stderr)
                 self.assertIn("STATUS     : Running", started.stderr)
+                self.assertIn("EXIT POLICY: keep-running", started.stderr)
+
+                stack_meta_path = root / ".dmon" / "dev.stack.json"
+                task_meta_path = root / ".dmon" / "service.meta.json"
+                stack_before_logs = stack_meta_path.read_bytes()
+                task_before_logs = task_meta_path.read_bytes()
+                viewed = self.run_dmon(root, "logs", "--tail", "1", "dev")
+                self.assertEqual(viewed.returncode, 0, viewed.stderr)
+                self.assertEqual(stack_meta_path.read_bytes(), stack_before_logs)
+                self.assertEqual(task_meta_path.read_bytes(), task_before_logs)
 
                 status = self.run_dmon(root, "status", "--stack")
                 self.assertEqual(status.returncode, 0, status.stderr)
@@ -295,7 +305,7 @@ class DetachedStackTest(unittest.TestCase):
             (root / "dmon.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
             meta_path = root / ".dmon" / "dev.stack.json"
             try:
-                started = self.run_dmon(root, "up", "-d", "dev")
+                started = self.run_dmon(root, "up", "-d", "--abort-on-exit", "dev")
                 self.assert_dmon_success(root, started)
                 deadline = time.monotonic() + 5
                 while time.monotonic() < deadline:
@@ -314,6 +324,104 @@ class DetachedStackTest(unittest.TestCase):
             finally:
                 if meta_path.exists():
                     self.run_dmon(root, "down", "dev")
+
+    def test_runtime_exit_degrades_detached_stack_until_down(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = {
+                "tasks": {
+                    "service": [
+                        sys.executable,
+                        "-c",
+                        "import time; time.sleep(60)",
+                    ],
+                    "short": [
+                        sys.executable,
+                        "-c",
+                        "import time; time.sleep(0.8)",
+                    ],
+                },
+                "stacks": {"dev": ["service", "short"]},
+            }
+            (root / "dmon.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+            meta_path = root / ".dmon" / "dev.stack.json"
+            try:
+                started = self.run_dmon(root, "up", "-d", "dev")
+                self.assert_dmon_success(root, started)
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    status = self.run_dmon(root, "status", "--stack", "dev")
+                    if "STATUS     : Degraded" in status.stderr:
+                        break
+                    time.sleep(0.1)
+                else:
+                    self.fail("detached stack did not report its degraded state")
+
+                self.assertNotEqual(status.returncode, 0)
+                self.assertIn("TASKS      : 1/2 running", status.stderr)
+                service_meta = json.loads(
+                    (root / ".dmon" / "service.meta.json").read_text(encoding="utf-8")
+                )
+                self.assertTrue(
+                    psutil.pid_exists(service_meta["pid"]),
+                    "remaining task was stopped by a non-fail-fast stack",
+                )
+
+                stopped = self.run_dmon(root, "down", "dev")
+                self.assertEqual(stopped.returncode, 0, stopped.stderr)
+                self.assertFalse(meta_path.exists())
+                self.assertFalse((root / ".dmon" / "service.meta.json").exists())
+                self.assertFalse((root / ".dmon" / "short.meta.json").exists())
+            finally:
+                if meta_path.exists():
+                    self.run_dmon(root, "down", "dev")
+
+    def test_restart_detached_stack_preserves_exit_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = {
+                "tasks": {
+                    "service": [
+                        sys.executable,
+                        "-c",
+                        "import time; time.sleep(60)",
+                    ]
+                },
+                "stacks": {"dev": ["service"]},
+            }
+            (root / "dmon.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+            meta_path = root / ".dmon" / "dev.stack.json"
+            try:
+                started = self.run_dmon(root, "up", "-d", "--abort-on-exit", "dev")
+                self.assert_dmon_success(root, started)
+                before = json.loads(meta_path.read_text(encoding="utf-8"))
+
+                restarted = self.run_dmon(root, "restart", "--stack", "dev")
+                self.assert_dmon_success(root, restarted)
+                after = json.loads(meta_path.read_text(encoding="utf-8"))
+
+                self.assertNotEqual(after["run_id"], before["run_id"])
+                self.assertTrue(after["abort_on_exit"])
+                self.assertEqual(after["state"], "running")
+            finally:
+                if meta_path.exists():
+                    self.run_dmon(root, "down", "dev")
+
+    def test_restart_does_not_start_a_stack_that_is_not_running(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = {
+                "tasks": {"service": [sys.executable, "-c", "pass"]},
+                "stacks": {"dev": ["service"]},
+            }
+            (root / "dmon.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+
+            restarted = self.run_dmon(root, "restart", "--stack", "dev")
+
+            self.assertNotEqual(restarted.returncode, 0)
+            self.assertIn("is not running", restarted.stderr)
+            self.assertFalse((root / ".dmon" / "dev.stack.json").exists())
+            self.assertFalse((root / ".dmon" / "service.meta.json").exists())
 
 
 if __name__ == "__main__":

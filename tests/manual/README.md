@@ -179,15 +179,24 @@ dmon status stack-db; echo "exit=$?"
 The missing task causes non-zero startup failure. `stack-db`, which started first,
 must be stopped and have no live metadata.
 
-### Runtime failure cleanup
+### Runtime degradation and fail-fast cleanup
 
 ```sh
-dmon up runtime-failure; echo "exit=$?"
+dmon up runtime-failure
 dmon status stack-db; echo "exit=$?"
 ```
 
-The stack first becomes ready; then `delayed-failure` exits. The command returns
-non-zero and cleans the remaining task.
+The stack first becomes ready; then `delayed-failure` exits. The foreground
+supervisor must report degradation while `stack-db` keeps running. Press Ctrl-C;
+the remaining task and metadata must then be cleaned.
+
+```sh
+dmon up --abort-on-exit runtime-failure; echo "exit=$?"
+dmon status stack-db; echo "exit=$?"
+```
+
+With the explicit policy, the runtime exit must return non-zero and clean the
+remaining task automatically.
 
 ### Readiness timeout
 
@@ -205,6 +214,7 @@ actionable timeout, return non-zero, and stop the task without stale metadata.
 dmon up -d healthy
 dmon status --stack healthy
 dmon up -d healthy; echo "duplicate_exit=$?"
+dmon restart --stack healthy
 dmon down healthy
 dmon status --stack healthy; echo "status_exit=$?"
 ```
@@ -212,6 +222,30 @@ dmon status --stack healthy; echo "status_exit=$?"
 Startup waits for readiness before returning. Status must show one supervisor
 and all three tasks running; the duplicate start must fail without disturbing
 them. `down` must stop tasks in reverse order and remove stack and task metadata.
+Restart must replace the supervisor and leave the stack healthy.
+
+Test degraded detached behavior:
+
+```sh
+dmon up -d runtime-failure
+sleep 2
+dmon status --stack runtime-failure; echo "status_exit=$?"
+dmon down runtime-failure
+```
+
+Status must be `Degraded`, return non-zero, and show `stack-db` still running.
+
+### Read-only stack logs
+
+```sh
+dmon up -d healthy
+dmon logs --tail 2 healthy
+dmon logs --tail 0 -f healthy
+```
+
+The snapshot and follow output must prefix every line with its task name. Press
+Ctrl-C while following, then run `dmon status --stack healthy`: the same
+supervisor and tasks must still be running. Finish with `dmon down healthy`.
 
 Test supervisor-crash recovery once on each operating system:
 

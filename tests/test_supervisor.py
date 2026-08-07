@@ -13,7 +13,7 @@ import unittest
 from unittest.mock import patch
 
 from dmon.control import check_running, start_single, stop_single
-from dmon.supervisor import cleanup, readiness_probe, task_message, up
+from dmon.supervisor import cleanup, monitor, readiness_probe, task_message, up
 from dmon.types import DmonMeta, DmonTaskConfig
 
 
@@ -92,7 +92,7 @@ class SupervisorTest(unittest.TestCase):
                 with redirect_stderr(StringIO()):
                     stop_single(running.meta_path, timeout=1.0)
 
-    def test_runtime_failure_stops_remaining_stack(self) -> None:
+    def test_abort_on_exit_stops_remaining_stack(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             running = self.make_config(
@@ -110,9 +110,55 @@ class SupervisorTest(unittest.TestCase):
                 ],
             )
             with redirect_stderr(StringIO()):
-                self.assertEqual(up([running, failing], poll_interval=0.05), 1)
+                self.assertEqual(
+                    up(
+                        [running, failing],
+                        poll_interval=0.05,
+                        abort_on_exit=True,
+                    ),
+                    1,
+                )
             self.assert_not_running(running)
             self.assert_not_running(failing)
+
+    def test_runtime_exit_degrades_stack_and_leaves_other_tasks_running(self) -> None:
+        configs = [
+            DmonTaskConfig(task="exited"),
+            DmonTaskConfig(task="running", depends_on=["exited"]),
+        ]
+        started = [
+            (configs[0], DmonMeta(task="exited", pid=1, create_time=1.0)),
+            (configs[1], DmonMeta(task="running", pid=2, create_time=2.0)),
+        ]
+        checks = 0
+
+        def stop_requested() -> bool:
+            nonlocal checks
+            checks += 1
+            return checks > 1
+
+        states = []
+
+        def record_state(state, _started) -> None:
+            states.append(state)
+
+        output = StringIO()
+        with patch(
+            "dmon.supervisor.check_running",
+            side_effect=lambda pid, _create_time: pid == 2,
+        ), redirect_stderr(output):
+            self.assertEqual(
+                monitor(
+                    started,
+                    poll_interval=0,
+                    stop_requested=stop_requested,
+                    state_callback=record_state,
+                ),
+                0,
+            )
+
+        self.assertEqual(states, ["degraded"])
+        self.assertIn("remaining stack will keep running", output.getvalue())
 
     def test_interrupt_stops_the_stack_and_returns_success(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

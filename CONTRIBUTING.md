@@ -22,6 +22,7 @@ validation and CI to detect an out-of-date lockfile.
 - `cli.py` parses arguments and selects an operation.
 - `config.py` loads, normalizes, and validates YAML/TOML configuration.
 - `control.py` owns individual task lifecycle and process metadata.
+- `logs.py` reads and follows task logs without importing process control.
 - `runner.py` captures task output and rotates logs.
 - `supervisor.py` coordinates dependent tasks, readiness, monitoring, and
   reverse-order cleanup, including persisted detached-stack ownership.
@@ -48,10 +49,12 @@ output so machine-readable output can be added without breaking terminal use.
   termination after the bounded grace period. Never leave descendants behind.
 - Forward a foreground terminal signal once. Do not both manually forward a
   signal and let the terminal deliver the same signal to the child group.
-- Multi-task `start` is best-effort. A supervised stack is fail-fast and cleans
+- Multi-task `start` is best-effort. Stack startup is transactional and cleans
   up only tasks started by that invocation, in reverse dependency order.
-- An interrupt, startup failure, readiness timeout, runtime exit, or unexpected
-  supervisor error must still run cleanup.
+- After readiness, a task exit degrades the stack while other tasks continue by
+  default. The explicit abort-on-exit policy is fail-fast. An interrupt,
+  startup failure, readiness timeout, requested stop, or unexpected supervisor
+  error must still run cleanup.
 - A detached stack persists the supervisor identity and immutable task process
   identities it owns. `down` uses a per-run, cross-platform stop request, then
   falls back to those identities if the supervisor has crashed; it must never
@@ -88,6 +91,10 @@ output so machine-readable output can be added without breaking terminal use.
 - Recognize legacy numeric padding and the pre-0.3.1 colon timestamp where the
   host filesystem permits it. Never create new filenames containing `:`.
 - Rotation is checked at line boundaries, so one long line may exceed the limit.
+- Stack log viewing is read-only: it must not import process-control operations,
+  write logs or metadata, or signal a process. Follow mode must close file
+  handles between polls, reopen replaced files after rotation, preserve partial
+  lines, and stop cleanly on Ctrl-C.
 
 ### Configuration and readiness
 

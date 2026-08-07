@@ -14,6 +14,7 @@ class DmonMetaTest(unittest.TestCase):
             expected = DmonStackMeta(
                 stack="dev",
                 run_id="run-123",
+                abort_on_exit=True,
                 state="running",
                 pid=41,
                 create_time=42.0,

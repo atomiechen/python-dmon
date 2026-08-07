@@ -33,13 +33,14 @@ from .constants import (
     STACK_LOG_PATH_TEMPLATE,
     STACK_META_PATH_TEMPLATE,
 )
-from .types import DmonTaskConfig
+from .logs import show_stack_logs
 from .supervisor import (
     start_detached_stack,
     status_detached_stack,
     stop_detached_stack,
     up,
 )
+from .types import DmonStackMeta, DmonTaskConfig
 
 
 def get_version():
@@ -128,6 +129,13 @@ def main():
         help=f"Path to log file (default: task configured or {LOG_PATH_TEMPLATE})",
     )
     sp_restart.add_argument("--all", action="store_true", help="Restart all processes")
+    sp_restart.add_argument(
+        "--stack",
+        nargs="?",
+        const="",
+        metavar="NAME",
+        help="Restart a detached stack (default: default_stack or the only stack)",
+    )
 
     # status subcommand
     sp_status = subparsers.add_parser(
@@ -249,6 +257,11 @@ def main():
         action="store_true",
         help="Run the stack under a background supervisor",
     )
+    sp_up.add_argument(
+        "--abort-on-exit",
+        action="store_true",
+        help="Stop the remaining tasks when any task exits after startup",
+    )
 
     sp_down = subparsers.add_parser(
         "down",
@@ -261,8 +274,41 @@ def main():
         nargs="?",
     )
 
+    sp_logs = subparsers.add_parser(
+        "logs",
+        help="Show output from every task in a configured stack",
+        description="Show or follow task logs without changing running processes",
+    )
+    sp_logs.add_argument(
+        "stack",
+        help="Configured stack name (default: default_stack or the only stack)",
+        nargs="?",
+    )
+    sp_logs.add_argument(
+        "-f",
+        "--follow",
+        action="store_true",
+        help="Keep displaying new log output",
+    )
+    sp_logs.add_argument(
+        "--tail",
+        type=non_negative_int,
+        default=100,
+        metavar="LINES",
+        help="Number of existing lines per task to show (default: 100)",
+    )
+
     # add custom config file option
-    for sp in [sp_start, sp_stop, sp_restart, sp_status, sp_exec, sp_up, sp_down]:
+    for sp in [
+        sp_start,
+        sp_stop,
+        sp_restart,
+        sp_status,
+        sp_exec,
+        sp_up,
+        sp_down,
+        sp_logs,
+    ]:
         sp.add_argument(
             "-c",
             "--config",
@@ -274,6 +320,35 @@ def main():
 
     if args.command in ["start", "restart"]:
         sp = sp_start if args.command == "start" else sp_restart
+        if args.command == "restart" and args.stack is not None:
+            if args.task or args.meta_file or args.log_file or args.all:
+                sp.error(
+                    "'--stack' cannot be combined with tasks, '--meta-file', "
+                    "'--log-file', or '--all'"
+                )
+            try:
+                requested = args.stack or None
+                stack, task_cfgs, cfg_path = get_stack_config(requested, args.config)
+                os.chdir(cfg_path.parent)
+                fill_default_paths(task_cfgs)
+                meta_path = Path(STACK_META_PATH_TEMPLATE.format(stack=stack))
+                current = DmonStackMeta.load(meta_path)
+            except Exception as e:
+                sp.error(str(e))
+            if current is None:
+                sp.error(f"Detached stack '{stack}' is not running")
+            if stop_detached_stack(meta_path):
+                sp.exit(1)
+            sp.exit(
+                start_detached_stack(
+                    stack,
+                    task_cfgs,
+                    cfg_path,
+                    meta_path,
+                    Path(STACK_LOG_PATH_TEMPLATE.format(stack=stack)),
+                    abort_on_exit=current.abort_on_exit,
+                )
+            )
         try:
             tasks, task_cfgs, cfg_path = get_task_config(
                 args.task, args.config, args.all
@@ -319,9 +394,10 @@ def main():
                     cfg_path,
                     Path(STACK_META_PATH_TEMPLATE.format(stack=stack)),
                     Path(STACK_LOG_PATH_TEMPLATE.format(stack=stack)),
+                    abort_on_exit=args.abort_on_exit,
                 )
             else:
-                exit_code = up(task_cfgs)
+                exit_code = up(task_cfgs, abort_on_exit=args.abort_on_exit)
         except Exception as e:
             print(f"Stack supervision failed: {e}", file=sys.stderr)
             exit_code = 1
@@ -335,6 +411,14 @@ def main():
         sp_down.exit(
             stop_detached_stack(Path(STACK_META_PATH_TEMPLATE.format(stack=stack)))
         )
+    elif args.command == "logs":
+        try:
+            _, task_cfgs, cfg_path = get_stack_config(args.stack, args.config)
+            os.chdir(cfg_path.parent)
+            fill_default_paths(task_cfgs)
+        except Exception as e:
+            sp_logs.error(str(e))
+        sp_logs.exit(show_stack_logs(task_cfgs, tail=args.tail, follow=args.follow))
     elif args.command in ["stop", "status"]:
         sp = sp_stop if args.command == "stop" else sp_status
         if args.command == "status" and args.stack is not None:
@@ -447,6 +531,13 @@ def resolve_stack_target(
         except FileNotFoundError:
             directory = Path.cwd()
     return name.lower(), directory
+
+
+def non_negative_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be zero or greater")
+    return parsed
 
 
 if __name__ == "__main__":

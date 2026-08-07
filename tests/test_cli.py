@@ -91,8 +91,34 @@ class CliTest(unittest.TestCase):
 
                 self.assertEqual(result.exception.code, 0)
                 self.assertTrue(Path.cwd().samefile(config_path.parent))
-                mocked_up.assert_called_once_with([task])
+                mocked_up.assert_called_once_with([task], abort_on_exit=False)
                 self.assertEqual(Path(task.meta_path), Path(".dmon/api.meta.json"))
+                self.assertEqual(Path(task.log_path), Path("logs/api.log"))
+            finally:
+                os.chdir(original_cwd)
+
+    def test_logs_loads_stack_paths_without_process_control(self) -> None:
+        original_cwd = Path.cwd()
+        with tempfile.TemporaryDirectory() as temporary:
+            try:
+                root = Path(temporary)
+                config_path = root / "project" / "dmon.yaml"
+                config_path.parent.mkdir()
+                task = DmonTaskConfig(task="api", cmd=["python", "api.py"])
+                with patch.object(
+                    sys,
+                    "argv",
+                    ["dmon", "logs", "dev", "--tail", "12", "-f"],
+                ), patch(
+                    "dmon.cli.get_stack_config",
+                    return_value=("dev", [task], config_path),
+                ), patch("dmon.cli.show_stack_logs", return_value=0) as mocked_logs:
+                    with self.assertRaises(SystemExit) as result:
+                        main()
+
+                self.assertEqual(result.exception.code, 0)
+                self.assertTrue(Path.cwd().samefile(config_path.parent))
+                mocked_logs.assert_called_once_with([task], tail=12, follow=True)
                 self.assertEqual(Path(task.log_path), Path("logs/api.log"))
             finally:
                 os.chdir(original_cwd)

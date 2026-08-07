@@ -70,6 +70,7 @@ def up(
     poll_interval: float = 0.2,
     state_callback: Optional[StackStateCallback] = None,
     stop_requested: Optional[StopCheck] = None,
+    abort_on_exit: bool = False,
 ) -> int:
     started: list[tuple[DmonTaskConfig, DmonMeta]] = []
     exit_code = 1
@@ -101,7 +102,13 @@ def up(
                 + colored(").", color="green", attrs=["bold"]),
                 file=sys.stderr,
             )
-            exit_code = monitor(started, poll_interval, stop_requested=stop_requested)
+            exit_code = monitor(
+                started,
+                poll_interval,
+                stop_requested=stop_requested,
+                state_callback=state_callback,
+                abort_on_exit=abort_on_exit,
+            )
     except KeyboardInterrupt:
         print(
             colored("\nStopping stack...", color="yellow", attrs=["bold"]),
@@ -151,22 +158,40 @@ def monitor(
     started: Sequence[tuple[DmonTaskConfig, DmonMeta]],
     poll_interval: float,
     stop_requested: Optional[StopCheck] = None,
+    state_callback: Optional[StackStateCallback] = None,
+    abort_on_exit: bool = False,
 ) -> int:
+    exited: set[int] = set()
     while True:
         if stop_requested is not None and stop_requested():
             print("Stopping stack by request...", file=sys.stderr)
             return 0
-        for config, meta in started:
+        for index, (config, meta) in enumerate(started):
             if not check_running(meta.pid, meta.create_time):
+                if index in exited:
+                    continue
+                exited.add(index)
+                if abort_on_exit:
+                    message = " exited; stopping the remaining stack."
+                else:
+                    message = " exited; the remaining stack will keep running."
                 print(
-                    task_message(
-                        config.task,
-                        " exited; stopping the remaining stack.",
-                        "red",
-                    ),
+                    task_message(config.task, message, "red"),
                     file=sys.stderr,
                 )
-                return 1
+                if abort_on_exit:
+                    return 1
+                notify_state(state_callback, "degraded", started)
+        if len(exited) == len(started):
+            print(
+                colored(
+                    "All tasks in the stack have exited.",
+                    color="yellow",
+                    attrs=["bold"],
+                ),
+                file=sys.stderr,
+            )
+            return 1
         time.sleep(poll_interval)
 
 
@@ -320,6 +345,7 @@ def start_detached_stack(
     config_path: Path,
     meta_path: Path,
     log_path: Path,
+    abort_on_exit: bool = False,
     poll_interval: float = 0.05,
 ) -> int:
     meta_path = meta_path.resolve()
@@ -351,6 +377,7 @@ def start_detached_stack(
     meta = DmonStackMeta(
         stack=stack,
         run_id=uuid.uuid4().hex,
+        abort_on_exit=abort_on_exit,
         state="reserved",
         pid=os.getpid(),
         create_time=psutil.Process(os.getpid()).create_time(),
@@ -560,6 +587,7 @@ def run_detached_stack(meta_path: Path, run_id: str, poll_interval: float = 0.5)
             poll_interval=poll_interval,
             state_callback=persist,
             stop_requested=lambda: stack_stop_requested(stop_path, meta.run_id),
+            abort_on_exit=meta.abort_on_exit,
         )
     except Exception as error:
         try:
@@ -727,6 +755,8 @@ def print_stack_status(meta: DmonStackMeta) -> None:
         file=sys.stderr,
     )
     print(f"TASKS      : {running_tasks}/{len(meta.tasks)} running", file=sys.stderr)
+    policy = "abort-on-exit" if meta.abort_on_exit else "keep-running"
+    print(f"EXIT POLICY: {policy}", file=sys.stderr)
     print(f"CONFIG     : {meta.config_path}", file=sys.stderr)
     print(f"LOG        : {meta.log_path}", file=sys.stderr)
     if meta.error:
