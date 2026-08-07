@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import tempfile
 import threading
@@ -86,6 +87,28 @@ class DmonMetaTest(unittest.TestCase):
             assert loaded is not None
             self.assertEqual((loaded.task, loaded.pid), ("second", 42))
             self.assertEqual(list(path.parent.glob("*.tmp")), [])
+
+    def test_regular_dump_retries_a_transient_replace_permission_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "task.meta.json"
+            DmonMeta(task="first").dump(path)
+            original_replace = os.replace
+            attempts = 0
+
+            def transient_error(source, target):
+                nonlocal attempts
+                attempts += 1
+                if attempts < 3:
+                    raise PermissionError("temporarily in use")
+                return original_replace(source, target)
+
+            with patch("dmon.types.os.replace", side_effect=transient_error), patch(
+                "dmon.types.time.sleep"
+            ):
+                DmonMeta(task="second").dump(path)
+
+            self.assertEqual(attempts, 3)
+            self.assertEqual(DmonMeta.load(path).task, "second")
 
 
 if __name__ == "__main__":

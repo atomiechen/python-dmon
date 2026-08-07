@@ -5,6 +5,7 @@ from os import PathLike
 from pathlib import Path
 import sys
 import tempfile
+import time
 from typing import Dict, List, Optional, Union
 
 
@@ -54,10 +55,22 @@ def dump_json(path: PathType, data: Dict, *, exclusive: bool = False) -> None:
             json.dump(data, stream, indent=2, ensure_ascii=False)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary_path, target)
+        replace_file(temporary_path, target)
     finally:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
+
+
+def replace_file(source: Path, target: Path, timeout: float = 0.5) -> None:
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.01)
 
 
 @dataclass
