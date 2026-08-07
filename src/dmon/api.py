@@ -21,8 +21,8 @@ from .results import (
     StackResult,
     TaskResult,
 )
-from .supervisor import stack_snapshot
-from .types import DmonMeta, DmonStackMeta
+from .inspection import inspect_stack, inspect_task
+from .types import DmonMeta
 
 
 class DmonError(Exception):
@@ -110,7 +110,11 @@ class Dmon:
             if meta_dir.is_dir():
                 for path in sorted(meta_dir.glob("*.meta.json")):
                     results.append(
-                        self._task_result(path.name[: -len(".meta.json")], path)
+                        inspect_task(
+                            path.name[: -len(".meta.json")],
+                            path,
+                            require_running=False,
+                        )
                     )
         return tuple(results)
 
@@ -120,8 +124,10 @@ class Dmon:
         project = self._project()
         name = stack.lower()
         with self._operation():
-            return self._stack_result(
-                name, project / DEFAULT_META_DIR / f"{name}{STACK_META_SUFFIX}"
+            return inspect_stack(
+                name,
+                project / DEFAULT_META_DIR / f"{name}{STACK_META_SUFFIX}",
+                require_running=True,
             )
 
     def list_stacks(self) -> Tuple[StackResult, ...]:
@@ -132,7 +138,7 @@ class Dmon:
             if meta_dir.is_dir():
                 for path in sorted(meta_dir.glob(f"*{STACK_META_SUFFIX}")):
                     name = path.name[: -len(STACK_META_SUFFIX)]
-                    results.append(self._stack_result(name, path))
+                    results.append(inspect_stack(name, path, require_running=False))
         return tuple(results)
 
     def _tasks(self, tasks: Sequence[str]):
@@ -169,32 +175,7 @@ class Dmon:
         return str(path.resolve() if path.is_absolute() else (project / path).resolve())
 
     def _task_result(self, name: str, path: Path) -> TaskResult:
-        try:
-            meta = self._load_task_meta(path)
-        except (OSError, ValueError, TypeError) as error:
-            return TaskResult(name=name, error=str(error))
-        if meta is None:
-            return TaskResult(name=name, error="task metadata not found")
-        snapshot = task_snapshot(meta)
-        return TaskResult(
-            name=name,
-            snapshot=snapshot,
-            error="" if snapshot.running else "task has exited",
-        )
-
-    def _stack_result(self, name: str, path: Path) -> StackResult:
-        try:
-            meta = DmonStackMeta.load(path)
-        except (OSError, ValueError, TypeError) as error:
-            return StackResult(name=name, error=str(error))
-        if meta is None:
-            return StackResult(name=name, error="stack metadata not found")
-        snapshot = stack_snapshot(meta)
-        return StackResult(
-            name=name,
-            snapshot=snapshot,
-            error="" if snapshot.running else f"stack is {snapshot.status}",
-        )
+        return inspect_task(name, path, require_running=True)
 
     @staticmethod
     def _load_task_meta(path: Path) -> Optional[DmonMeta]:

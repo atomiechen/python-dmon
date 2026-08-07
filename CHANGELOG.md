@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Add read-only stack log snapshots and following with `dmon stack logs` and `dmon stack logs -f`.
 - Make foreground stacks discoverable through `dmon stack status` and `dmon stack list`, and safely stoppable from another terminal with `dmon stack down`.
 - Add a silent, structured Python API through `from dmon import Dmon` for task lifecycle and task/stack inspection.
+- Add `--format json` to finite task and stack status/list commands.
 
 ### Fixed
 

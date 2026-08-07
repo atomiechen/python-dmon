@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 from pathlib import Path
 import shlex
@@ -29,11 +30,15 @@ from .constants import (
     DEFAULT_RUN_NAME,
     LOG_PATH_TEMPLATE,
     META_PATH_TEMPLATE,
+    META_SUFFIX,
     ROTATE_LOG_PATH_TEMPLATE,
     STACK_LOG_PATH_TEMPLATE,
+    STACK_META_SUFFIX,
     STACK_META_PATH_TEMPLATE,
 )
 from .logs import show_stack_logs
+from .inspection import inspect_stack, inspect_task
+from .serialization import stack_result_data, task_result_data
 from .supervisor import (
     list_stacks,
     start_detached_stack,
@@ -143,6 +148,7 @@ def main():
         help="Configured task name (default: the only task if there's just one)",
         nargs="*",
     )
+    sp_status.add_argument("--format", choices=("human", "json"), default="human")
     sp_status.add_argument(
         "--meta-file",
         help=f"Path to meta file (default: {META_PATH_TEMPLATE})",
@@ -166,6 +172,7 @@ def main():
         help=f"Directory to look for meta files (default: {DEFAULT_META_DIR})",
         nargs="?",
     )
+    sp_list.add_argument("--format", choices=("human", "json"), default="human")
     sp_list.add_argument(
         "--full",
         action="store_true",
@@ -289,6 +296,7 @@ def main():
         help="Configured stack name (default: default_stack or the only stack)",
         nargs="?",
     )
+    sp_stack_status.add_argument("--format", choices=("human", "json"), default="human")
 
     sp_stack_logs = stack_subparsers.add_parser(
         "logs",
@@ -319,6 +327,7 @@ def main():
         help="List all recorded stacks",
         description="List all recorded stack metadata in the project",
     )
+    sp_stack_list.add_argument("--format", choices=("human", "json"), default="human")
 
     # add custom config file option
     for sp in [
@@ -401,6 +410,8 @@ def main():
                 os.chdir(directory)
             except Exception as error:
                 sp.error(str(error))
+            if args.format == "json":
+                sp.exit(json_stack_list(DEFAULT_META_DIR))
             sp.exit(list_stacks(DEFAULT_META_DIR))
 
         if args.stack_command == "restart":
@@ -441,6 +452,8 @@ def main():
         if args.stack_command == "down":
             sp.exit(stop_stack(meta_path))
         if args.stack_command == "status":
+            if args.format == "json":
+                sp.exit(json_stack_status(stack, meta_path))
             sp.exit(status_stack(meta_path))
     elif args.command in ["start", "restart"]:
         sp = sp_start if args.command == "start" else sp_restart
@@ -519,9 +532,13 @@ def main():
         if args.command == "stop":
             sp.exit(stop(unique_meta_paths))
         else:
+            if args.format == "json":
+                sp.exit(json_task_status(unique_meta_paths))
             sp.exit(status(unique_meta_paths))
     elif args.command == "list":
         dir = args.dir or DEFAULT_META_DIR
+        if args.format == "json":
+            sp_list.exit(json_task_list(Path(dir)))
         sp_list.exit(list_processes(dir, args.full))
     elif args.command == "run":
         command_list = args.command_list
@@ -579,6 +596,62 @@ def non_negative_int(value: str) -> int:
     if parsed < 0:
         raise argparse.ArgumentTypeError("must be zero or greater")
     return parsed
+
+
+def json_task_status(meta_paths) -> int:
+    results = [
+        inspect_task(
+            metadata_name(Path(path), META_SUFFIX),
+            Path(path),
+            require_running=True,
+        )
+        for path in meta_paths
+    ]
+    return print_json_results("tasks", results, task_result_data)
+
+
+def metadata_name(path: Path, suffix: str) -> str:
+    return path.name[: -len(suffix)] if path.name.endswith(suffix) else path.stem
+
+
+def json_task_list(meta_dir: Path) -> int:
+    target = meta_dir.resolve()
+    paths = sorted(target.glob(f"*{META_SUFFIX}")) if target.is_dir() else []
+    results = [
+        inspect_task(path.name[: -len(META_SUFFIX)], path, require_running=False)
+        for path in paths
+    ]
+    return print_json_results("tasks", results, task_result_data)
+
+
+def json_stack_status(name: str, meta_path: Path) -> int:
+    result = inspect_stack(name, meta_path, require_running=True)
+    return print_json_results("stacks", [result], stack_result_data)
+
+
+def json_stack_list(meta_dir: Path) -> int:
+    target = meta_dir.resolve()
+    paths = sorted(target.glob(f"*{STACK_META_SUFFIX}")) if target.is_dir() else []
+    results = [
+        inspect_stack(path.name[: -len(STACK_META_SUFFIX)], path, require_running=False)
+        for path in paths
+    ]
+    return print_json_results("stacks", results, stack_result_data)
+
+
+def print_json_results(key, results, serializer) -> int:
+    ok = all(result.ok for result in results)
+    print(
+        json.dumps(
+            {"ok": ok, key: [serializer(result) for result in results]},
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    for result in results:
+        if result.error:
+            print(f"{result.name}: {result.error}", file=sys.stderr)
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

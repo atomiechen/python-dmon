@@ -89,6 +89,9 @@ output so machine-readable output can be added without breaking terminal use.
   output.
 - Render task and stack identifiers without quotes in structured tables. Quote
   them in prose diagnostics so their boundaries remain unambiguous.
+- JSON inspection reuses the public result models, writes data only to stdout,
+  keeps diagnostics on stderr, emits no ANSI, and preserves human-mode exit
+  semantics. Do not add JSON to streaming commands without a defined protocol.
 
 ### Python API
 

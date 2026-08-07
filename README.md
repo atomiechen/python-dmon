@@ -268,6 +268,21 @@ dmon run --cwd /path/to/script bash myscript.sh
 dmon list
 ```
 
+Finite inspection commands also support machine-readable output:
+
+```sh
+dmon status app --format json
+dmon list --format json
+dmon stack status dev --format json
+dmon stack list --format json
+```
+
+JSON is written only to stdout; actionable diagnostics remain on stderr. The
+payload has a top-level `ok` field and a `tasks` or `stacks` array of result
+objects containing `name`, `ok`, `error`, and an optional `snapshot`. Existing
+exit-code semantics are unchanged. Interactive and streaming commands do not
+offer JSON output.
+
 ### Python API
 
 The same task lifecycle and inspection logic is available without parsing CLI
