@@ -53,3 +53,49 @@ class StackSnapshot:
     @property
     def running(self) -> bool:
         return self.status == "running"
+
+
+@dataclass(frozen=True)
+class TaskResult:
+    name: str
+    snapshot: Optional[TaskSnapshot] = None
+    error: str = ""
+
+    @property
+    def ok(self) -> bool:
+        return self.snapshot is not None and not self.error
+
+
+@dataclass(frozen=True)
+class StackResult:
+    name: str
+    snapshot: Optional[StackSnapshot] = None
+    error: str = ""
+
+    @property
+    def ok(self) -> bool:
+        return self.snapshot is not None and not self.error
+
+
+@dataclass(frozen=True)
+class ActionResult:
+    action: str
+    name: str
+    ok: bool
+    exit_code: int
+    snapshot: Optional[TaskSnapshot] = None
+    error: str = ""
+
+
+@dataclass(frozen=True)
+class BatchResult:
+    action: str
+    results: Tuple[ActionResult, ...]
+
+    @property
+    def ok(self) -> bool:
+        return all(result.ok for result in self.results)
+
+    @property
+    def exit_code(self) -> int:
+        return 0 if self.ok else 1

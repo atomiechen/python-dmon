@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 import os
 from pathlib import Path
@@ -7,7 +9,8 @@ import signal
 import sys
 import subprocess
 import time
-from typing import List, Optional, Sequence
+from typing import Iterator, List, Optional, Sequence, TextIO
+import warnings
 
 import psutil
 from termcolor import colored
@@ -16,6 +19,28 @@ from .constants import DEFAULT_META_DIR, META_SUFFIX, ON_WINDOWS
 from .results import CommandSnapshot, TaskSnapshot
 from .types import DmonTaskConfig, DmonMeta, PathType
 from .utils import len_ansi, pad_ansi
+
+
+_builtin_print = print
+_diagnostic_stream: ContextVar[Optional[TextIO]] = ContextVar(
+    "dmon_diagnostic_stream", default=None
+)
+
+
+def print(*values, **kwargs) -> None:
+    stream = _diagnostic_stream.get()
+    if stream is not None and kwargs.get("file") is sys.stderr:
+        kwargs["file"] = stream
+    _builtin_print(*values, **kwargs)
+
+
+@contextmanager
+def diagnostic_output(stream: TextIO) -> Iterator[None]:
+    token = _diagnostic_stream.set(stream)
+    try:
+        yield
+    finally:
+        _diagnostic_stream.reset(token)
 
 
 @dataclass(frozen=True)
@@ -279,6 +304,9 @@ def start_single_result(cfg: DmonTaskConfig) -> StartResult:
         return StartResult(1)
 
     print_status(meta)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", ResourceWarning)
+        del proc
     return StartResult(0, meta)
 
 

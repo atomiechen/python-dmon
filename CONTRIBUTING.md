@@ -90,6 +90,18 @@ output so machine-readable output can be added without breaking terminal use.
 - Render task and stack identifiers without quotes in structured tables. Quote
   them in prose diagnostics so their boundaries remain unambiguous.
 
+### Python API
+
+- Public imports come from `dmon`; implementation details may remain in
+  `dmon.api`.
+- API methods are synchronous, return immutable result models, emit no terminal
+  output, never call `sys.exit`, and never change the caller's working
+  directory.
+- Configuration and usage errors raise `DmonConfigError`. Expected runtime
+  outcomes remain structured results.
+- API lifecycle methods call the same control functions as the CLI. Do not
+  reproduce process ownership, cleanup, or PID identity logic in the wrapper.
+
 ### Logging
 
 - `log_path` is task output. `rotate_log_path` is runner diagnostics. They are

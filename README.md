@@ -268,6 +268,27 @@ dmon run --cwd /path/to/script bash myscript.sh
 dmon list
 ```
 
+### Python API
+
+The same task lifecycle and inspection logic is available without parsing CLI
+output:
+
+```python
+from dmon import Dmon
+
+client = Dmon(config="dmon.yaml")
+started = client.start("app")
+task = client.status("app")
+stacks = client.list_stacks()
+client.stop("app")
+```
+
+API calls are synchronous and silent. They return immutable `ActionResult`,
+`TaskResult`, and `StackResult` data; expected runtime states such as missing or
+exited metadata are results, while invalid configuration raises
+`DmonConfigError`. The initial API intentionally does not start a supervised
+stack or create implicit background threads.
+
 
 ## Example Configuration
 
