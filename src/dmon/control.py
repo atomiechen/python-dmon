@@ -45,8 +45,11 @@ def start(cfgs: Sequence[DmonTaskConfig]):
             print("---", file=sys.stderr)  # print a blank line between tasks
     if failed and len(cfgs) > 1:
         succeeded = len(cfgs) - len(failed)
+        failed_tasks = ", ".join(
+            colored(f"'{task}'", color="cyan", attrs=["bold"]) for task in failed
+        )
         print(
-            f"\nStarted {succeeded} task(s); failed to start: {', '.join(failed)}. "
+            f"\nStarted {succeeded} task(s); failed to start: {failed_tasks}. "
             "Multi-task start is best-effort, so successful tasks were left running.",
             file=sys.stderr,
         )
@@ -733,14 +736,6 @@ def execute(cfg: DmonTaskConfig):
         # On Windows, use full path for the executable when shell=False
         cfg.cmd[0] = shutil.which(cfg.cmd[0]) or cfg.cmd[0]
 
-    def signal_handler(signum: int, frame) -> None:
-        if ON_WINDOWS and signum == signal.SIGINT:
-            signum = signal.SIGTERM
-        proc.send_signal(signum)
-
-    prev_handle_int = signal.signal(signal.SIGINT, signal_handler)
-    prev_handle_term = signal.signal(signal.SIGTERM, signal_handler)
-
     proc = subprocess.Popen(
         cfg.cmd,
         cwd=cwd,
@@ -749,8 +744,24 @@ def execute(cfg: DmonTaskConfig):
         bufsize=0,  # unbuffered
         close_fds=False,
     )
-    ret = proc.wait()
 
-    signal.signal(signal.SIGTERM, prev_handle_term)
-    signal.signal(signal.SIGINT, prev_handle_int)
-    return ret
+    def signal_handler(signum: int, frame) -> None:
+        # POSIX terminals deliver SIGINT to both foreground processes. Forwarding
+        # it would make the child receive Ctrl-C twice. Windows needs explicit
+        # forwarding, translated to a signal subprocess can deliver reliably.
+        if not ON_WINDOWS and signum == signal.SIGINT:
+            return
+        if ON_WINDOWS and signum == signal.SIGINT:
+            signum = signal.SIGTERM
+        try:
+            proc.send_signal(signum)
+        except ProcessLookupError:
+            pass
+
+    prev_handle_int = signal.signal(signal.SIGINT, signal_handler)
+    prev_handle_term = signal.signal(signal.SIGTERM, signal_handler)
+    try:
+        return proc.wait()
+    finally:
+        signal.signal(signal.SIGTERM, prev_handle_term)
+        signal.signal(signal.SIGINT, prev_handle_int)

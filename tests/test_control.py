@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from contextlib import redirect_stderr
 from io import StringIO
+import os
 from pathlib import Path
+import signal
 import sys
 import subprocess
 import tempfile
@@ -25,6 +27,7 @@ from dmon.types import DmonMeta, DmonTaskConfig
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "process_tree.py"
+SIGNAL_FIXTURE = Path(__file__).parent / "fixtures" / "count_signals.py"
 
 
 def wait_until(predicate, timeout: float = 5.0) -> None:
@@ -165,8 +168,42 @@ class ControlTest(unittest.TestCase):
                 self.assertTrue(psutil.pid_exists(meta.pid))
                 self.assertIn("best-effort", output.getvalue())
                 self.assertIn("successful tasks were left running", output.getvalue())
+                self.assertIn("failed to start: 'missing'", output.getvalue())
             finally:
                 self.cleanup_config(running)
+
+    @unittest.skipIf(sys.platform == "win32", "POSIX foreground process groups only")
+    def test_exec_delivers_terminal_sigint_once(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            signal_file = root / "signals.txt"
+            config = root / "dmon.yaml"
+            config.write_text(
+                "tasks:\n"
+                "  foreground:\n"
+                f"    cmd: [{sys.executable!r}, {str(SIGNAL_FIXTURE)!r}, {str(signal_file)!r}]\n",
+                encoding="utf-8",
+            )
+            process = subprocess.Popen(
+                [sys.executable, "-m", "dmon", "exec", "-c", str(config), "foreground"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                start_new_session=True,
+            )
+            try:
+                assert process.stdout is not None
+                self.assertTrue(process.stdout.readline().strip().isdigit())
+                os.killpg(process.pid, signal.SIGINT)
+                _, stderr = process.communicate(timeout=5)
+                self.assertEqual(process.returncode, 0, stderr)
+                self.assertEqual(
+                    signal_file.read_text(encoding="utf-8"), f"{signal.SIGINT}\n"
+                )
+            finally:
+                if process.poll() is None:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.wait(timeout=2)
 
     def test_status_fails_for_exited_task_and_stop_cleans_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -241,6 +278,44 @@ class ControlTest(unittest.TestCase):
 
                 with redirect_stderr(StringIO()):
                     self.assertEqual(stop_single(config.meta_path, timeout=2.0), 0)
+                wait_until(lambda: not psutil.pid_exists(meta.pid))
+                wait_until(
+                    lambda: not psutil.pid_exists(child_pid)
+                    or psutil.Process(child_pid).status() == psutil.STATUS_ZOMBIE
+                )
+                self.assertFalse(Path(config.meta_path).exists())
+            finally:
+                self.cleanup_config(config)
+
+    @unittest.skipIf(sys.platform == "win32", "POSIX process groups only")
+    def test_stop_kills_process_group_after_grace_period(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            child_pid_file = root / "child.pid"
+            config = self.make_config(
+                root,
+                "stubborn",
+                [
+                    sys.executable,
+                    str(FIXTURE),
+                    "--child-pid-file",
+                    str(child_pid_file),
+                    "--ignore-term",
+                ],
+            )
+            try:
+                with redirect_stderr(StringIO()):
+                    self.assertEqual(start_single(config), 0)
+                meta = DmonMeta.load(config.meta_path)
+                self.assertIsNotNone(meta)
+                assert meta is not None
+                wait_until(child_pid_file.exists)
+                child_pid = int(child_pid_file.read_text(encoding="utf-8"))
+
+                output = StringIO()
+                with redirect_stderr(output):
+                    self.assertEqual(stop_single(config.meta_path, timeout=0.1), 0)
+                self.assertIn("did not exit in time; killing it", output.getvalue())
                 wait_until(lambda: not psutil.pid_exists(meta.pid))
                 wait_until(
                     lambda: not psutil.pid_exists(child_pid)

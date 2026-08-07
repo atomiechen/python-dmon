@@ -22,6 +22,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Treat zombie and exited processes as stopped, return a failing status for exited tasks, and clean stale metadata safely.
 - Resolve explicit `stop` and `status` task metadata relative to the selected config file.
 - Allow ad-hoc `dmon run` outside a directory containing a dmon config file.
+- Deliver Ctrl-C only once to foreground tasks run with `dmon exec`.
+- Keep log rotation bounded to the active file and one backup instead of accumulating timestamped files indefinitely.
 
 
 ## [0.3.0] - 2026-01-09

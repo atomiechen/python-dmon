@@ -11,6 +11,34 @@ from dmon.cli import main
 
 
 class CliTest(unittest.TestCase):
+    def test_run_preserves_child_options_after_separator(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "dmon",
+                    "run",
+                    "--name",
+                    "adhoc",
+                    "--meta-file",
+                    str(root / "adhoc.json"),
+                    "--",
+                    sys.executable,
+                    "-c",
+                    "print('ok')",
+                ],
+            ), patch("dmon.cli.check_name_in_config", return_value=False), patch(
+                "dmon.cli.start", return_value=0
+            ) as mocked_start:
+                with self.assertRaises(SystemExit) as result:
+                    main()
+
+            self.assertEqual(result.exception.code, 0)
+            config = mocked_start.call_args.args[0][0]
+            self.assertEqual(config.cmd, [sys.executable, "-c", "print('ok')"])
+
     def test_stop_with_config_resolves_metadata_from_config_directory(self) -> None:
         original_cwd = Path.cwd()
         with tempfile.TemporaryDirectory() as temporary:

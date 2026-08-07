@@ -193,9 +193,9 @@ def main():
     )
     sp_run.add_argument(
         "command_list",
-        metavar="command",
+        metavar="COMMAND",
         nargs=argparse.ONE_OR_MORE,
-        help="Command (with args) to run",
+        help="Command and arguments to run; use '--' before command options",
     )
 
     sp_exec = subparsers.add_parser(

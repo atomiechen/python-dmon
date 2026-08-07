@@ -1,5 +1,4 @@
 import argparse
-from datetime import datetime
 import logging
 from logging.handlers import RotatingFileHandler
 import os
@@ -9,24 +8,6 @@ import sys
 
 
 logger = logging.getLogger("dmon.runner")
-
-
-class FixedSizeRotatingFileHandler(RotatingFileHandler):
-    """
-    Custom RotatingFileHandler that renames the old log file with a timestamp suffix
-    instead of deleting it.
-    """
-
-    def __init__(self, filename, maxBytes):
-        super().__init__(filename, maxBytes=maxBytes)
-
-    def doRollover(self):
-        if self.stream:
-            self.stream.close()
-        # Create timestamped filename for the rollover logs
-        current_time = datetime.now().strftime(".%Y%m%d-%H:%M:%S")
-        self.rotate(self.baseFilename, self.baseFilename + current_time)
-        self.stream = self._open()
 
 
 def get_file_dir(file_path):
@@ -49,14 +30,10 @@ def need_rotate(log_path, max_log_size):
 
 
 def rotate_log(log_path):
-    current_time = datetime.now().strftime(".%Y%m%d-%H%M%S")
-    new_name = log_path + current_time
+    new_name = log_path + ".1"
     logger.info(f"Rotating {log_path} to {new_name}")
-    if os.path.exists(new_name):
-        logger.warning(f"{new_name} already exists, skip renaming")
-    else:
-        make_file_dir(new_name)
-        os.rename(log_path, new_name)
+    make_file_dir(new_name)
+    os.replace(log_path, new_name)
 
 
 def loop_to_log(bin_fd, log_path, max_log_size):
@@ -103,7 +80,11 @@ def main(
     # Configure logging
     rh = None
     if rotate_log_path:
-        rh = FixedSizeRotatingFileHandler(rotate_log_path, maxBytes=max_rotate_log_size)
+        rh = RotatingFileHandler(
+            rotate_log_path,
+            maxBytes=max_rotate_log_size,
+            backupCount=1,
+        )
     logging.basicConfig(
         format="%(asctime)s.%(msecs)03d - %(process)d - %(levelname)s - %(message)s",
         level=logging.INFO,

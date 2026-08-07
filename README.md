@@ -159,6 +159,9 @@ tasks:
 # Run a command with arguments in the background
 dmon run --name myserver python -u server.py
 
+# Use -- before options that belong to the child command
+dmon run --name timer -- python -c 'import time; time.sleep(30)'
+
 # Run a shell command in the background
 dmon run --shell echo "Hello World"
 
