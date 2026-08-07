@@ -1,5 +1,6 @@
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 import shlex
@@ -7,7 +8,9 @@ import sys
 from typing import Optional, Tuple
 
 from colorama import just_fix_windows_console
+from termcolor import colored
 
+from .api import Dmon, DmonConfigError
 from .config import (
     check_name_in_config,
     fill_default_paths,
@@ -15,6 +18,7 @@ from .config import (
     get_task_config,
     load_config,
     resolve_stack,
+    validate_ready,
 )
 from .control import (
     execute,
@@ -38,7 +42,9 @@ from .constants import (
 )
 from .logs import show_stack_logs
 from .inspection import inspect_stack, inspect_task
-from .serialization import stack_result_data, task_result_data
+from .readiness import ready_spec, wait_for_readiness
+from .results import WaitResult
+from .serialization import stack_result_data, task_result_data, wait_result_data
 from .supervisor import (
     list_stacks,
     start_detached_stack,
@@ -235,6 +241,22 @@ def main():
         nargs="?",
     )
 
+    sp_wait = subparsers.add_parser(
+        "wait",
+        help="Wait for configured tasks or an explicit readiness probe",
+        description="Wait for task, HTTP, TCP, or command readiness",
+    )
+    sp_wait.add_argument("task", nargs="*", help="Configured task name(s)")
+    direct_wait = sp_wait.add_mutually_exclusive_group()
+    direct_wait.add_argument("--http", metavar="URL")
+    direct_wait.add_argument("--tcp", metavar="HOST:PORT")
+    direct_wait.add_argument(
+        "--command", dest="probe_command", nargs=argparse.REMAINDER, metavar="ARG"
+    )
+    sp_wait.add_argument("--timeout", type=positive_float)
+    sp_wait.add_argument("--interval", type=positive_float)
+    sp_wait.add_argument("--format", choices=("human", "json"), default="human")
+
     sp_stack = subparsers.add_parser(
         "stack",
         help="Manage a supervised stack of related tasks",
@@ -336,6 +358,7 @@ def main():
         sp_restart,
         sp_status,
         sp_exec,
+        sp_wait,
     ]:
         sp.add_argument(
             "-c",
@@ -358,7 +381,12 @@ def main():
             help="Path to config file or project directory (default: search from current directory upwards)",
         )
 
-    args = parser.parse_args()
+    argv = sys.argv[1:]
+    if argv and argv[0] == "wait" and "--command" in argv:
+        command_index = argv.index("--command")
+        if len(argv) > command_index + 1 and argv[command_index + 1] == "--":
+            argv = [*argv[: command_index + 1], *argv[command_index + 2 :]]
+    args = parser.parse_args(argv)
 
     if args.command == "stack":
         sp = {
@@ -487,6 +515,8 @@ def main():
         except Exception as e:
             sp_exec.error(str(e))
         sp_exec.exit(execute(task_cfgs[0]))
+    elif args.command == "wait":
+        sp_wait.exit(run_wait(args, sp_wait))
     elif args.command in ["stop", "status"]:
         sp = sp_stop if args.command == "stop" else sp_status
         meta_paths = []
@@ -596,6 +626,112 @@ def non_negative_int(value: str) -> int:
     if parsed < 0:
         raise argparse.ArgumentTypeError("must be zero or greater")
     return parsed
+
+
+def positive_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed <= 0:
+        raise argparse.ArgumentTypeError("must be finite and greater than zero")
+    return parsed
+
+
+def run_wait(args, parser) -> int:
+    direct = (
+        args.http is not None or args.tcp is not None or args.probe_command is not None
+    )
+    if direct and args.task:
+        parser.error("configured task names cannot be combined with a direct probe")
+    try:
+        if direct:
+            results = [run_direct_wait(args)]
+        else:
+            results = list(
+                Dmon(config=args.config).wait(
+                    *args.task, timeout=args.timeout, interval=args.interval
+                )
+            )
+    except KeyboardInterrupt:
+        print("\nReadiness wait interrupted.", file=sys.stderr)
+        return 130
+    except (DmonConfigError, OSError, ValueError, TypeError) as error:
+        parser.error(str(error))
+
+    if args.format == "json":
+        print(
+            json.dumps(
+                {
+                    "ok": all(result.ready for result in results),
+                    "waits": [wait_result_data(result) for result in results],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+    else:
+        target_kind = "Probe" if direct else "Task"
+        for result in results:
+            label = colored(f"'{result.target}'", color="cyan", attrs=["bold"])
+            if result.ready:
+                print(
+                    colored(f"{target_kind} ", color="green", attrs=["bold"])
+                    + label
+                    + colored(" is ready.", color="green", attrs=["bold"]),
+                    file=sys.stderr,
+                )
+            else:
+                detail = f": {result.error}" if result.error else ""
+                print(
+                    colored(f"{target_kind} ", color="red", attrs=["bold"])
+                    + label
+                    + colored(
+                        f" is not ready ({result.reason}){detail}.",
+                        color="red",
+                        attrs=["bold"],
+                    ),
+                    file=sys.stderr,
+                )
+    return 0 if all(result.ready for result in results) else 1
+
+
+def run_direct_wait(args) -> WaitResult:
+    if args.http is not None:
+        ready = {"http": args.http}
+        target = args.http
+    elif args.tcp is not None:
+        host, port = parse_tcp_target(args.tcp)
+        ready = {"tcp": {"host": host, "port": port}}
+        target = args.tcp
+    else:
+        command = list(args.probe_command or [])
+        if not command:
+            raise ValueError("--command requires a command")
+        ready = {"command": command}
+        target = "command"
+    if args.timeout is not None:
+        ready["timeout"] = args.timeout
+    if args.interval is not None:
+        ready["interval"] = args.interval
+    validated = validate_ready(ready, "wait")
+    spec = ready_spec(validated)
+    return wait_for_readiness(
+        target,
+        spec,
+        cwd=str(Path.cwd()),
+        env=None,
+    )
+
+
+def parse_tcp_target(value: str):
+    host, separator, port_text = value.rpartition(":")
+    if not separator or not host:
+        raise ValueError("--tcp must use HOST:PORT")
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    try:
+        port = int(port_text)
+    except ValueError as error:
+        raise ValueError("--tcp port must be an integer") from error
+    return host, port
 
 
 def json_task_status(meta_paths) -> int:

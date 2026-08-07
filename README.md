@@ -24,6 +24,8 @@ It is a Python-based and more powerful successor to the [handy-backend shell scr
 - 🌙 **Foreground or detached:** Keep a stack attached for development, or run
   it under a recoverable background supervisor with `dmon stack up -d` and
   `dmon stack down`.
+- ⏱️ **Reusable readiness:** Wait for configured tasks or direct HTTP, TCP, and
+  command probes from scripts and deployment workflows.
 - 🪵 **Logging & log rotation:** Keep active log files manageable, with optional archive retention limits.
 
 ![dmon-demo-gif](https://github.com/user-attachments/assets/9bae2f46-5ef4-4784-aced-18d573204efc)
@@ -183,6 +185,11 @@ attach output. `dmon stack logs` reads the latest 100 lines per task by default;
 modifies the underlying files and never controls running processes. Docker
 Compose is still appropriate when container behavior itself must be tested.
 
+Terminal attachment and process management are separate choices: `dmon exec`
+is foreground but intentionally unmanaged, while foreground `dmon stack up` is
+supervised, recorded, and discoverable from another terminal. Detached stacks
+use the same ownership model without attaching their output.
+
 Detached mode waits for the same startup and readiness checks before returning.
 A lightweight background supervisor keeps monitoring the stack; `dmon stack down`
 requests the same graceful reverse-order cleanup on every platform. If that
@@ -192,6 +199,32 @@ clean the tasks it started. Supervisor diagnostics are written to
 process tree; `dmon stack list` summarizes all recorded foreground and detached
 stacks. `dmon stack restart` applies to detached stacks: it performs a clean
 `down` followed by a detached `up` and preserves the stack's exit policy.
+
+### Wait for readiness
+
+`dmon wait` checks readiness without starting or stopping anything. For a
+configured task, the task must already be managed by `dmon start` or a stack;
+the command uses that task's configured probe, working directory, environment,
+and process identity. The task name can be omitted when `default_task` is set or
+the configuration contains only one task:
+
+```sh
+dmon wait api
+dmon wait api worker --timeout 60 --interval 0.5
+```
+
+Direct probes need no dmon configuration:
+
+```sh
+dmon wait --http http://127.0.0.1:8000/health
+dmon wait --tcp 127.0.0.1:5432
+dmon wait --timeout 30 --command -- python healthcheck.py --verbose
+```
+
+For command probes, dmon options must precede `--command`; the optional second
+`--` marks the child-command boundary. The command returns zero only when every
+target is ready, one for a completed unsuccessful wait, and 130 when interrupted.
+Configured timeouts and intervals can be overridden with positive values.
 
 Or use `--all` to operate on all tasks:
 
@@ -268,20 +301,22 @@ dmon run --cwd /path/to/script bash myscript.sh
 dmon list
 ```
 
-Finite inspection commands also support machine-readable output:
+Finite inspection and readiness commands also support machine-readable output:
 
 ```sh
 dmon status app --format json
 dmon list --format json
 dmon stack status dev --format json
 dmon stack list --format json
+dmon wait api --format json
 ```
 
 JSON is written only to stdout; actionable diagnostics remain on stderr. The
-payload has a top-level `ok` field and a `tasks` or `stacks` array of result
-objects containing `name`, `ok`, `error`, and an optional `snapshot`. Existing
-exit-code semantics are unchanged. Interactive and streaming commands do not
-offer JSON output.
+payload has a top-level `ok` field and a `tasks`, `stacks`, or `waits` array.
+Inspection results contain `name`, `ok`, `error`, and an optional `snapshot`;
+wait results contain the target, outcome, reason, elapsed time, and attempt
+count. Existing exit-code semantics are unchanged. Interactive and streaming
+commands do not offer JSON output.
 
 ### Python API
 
@@ -293,14 +328,15 @@ from dmon import Dmon
 
 client = Dmon(config="dmon.yaml")
 started = client.start("app")
+ready = client.wait("app", timeout=30)
 task = client.status("app")
 stacks = client.list_stacks()
 client.stop("app")
 ```
 
 API calls are synchronous and silent. They return immutable `ActionResult`,
-`TaskResult`, and `StackResult` data; expected runtime states such as missing or
-exited metadata are results, while invalid configuration raises
+`TaskResult`, `StackResult`, and `WaitResult` data; expected runtime states such
+as missing or exited metadata are results, while invalid configuration raises
 `DmonConfigError`. The initial API intentionally does not start a supervised
 stack or create implicit background threads.
 

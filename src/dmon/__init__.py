@@ -6,6 +6,7 @@ from .results import (
     StackSnapshot,
     TaskResult,
     TaskSnapshot,
+    WaitResult,
 )
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "StackSnapshot",
     "TaskResult",
     "TaskSnapshot",
+    "WaitResult",
 ]

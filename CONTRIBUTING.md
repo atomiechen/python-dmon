@@ -92,7 +92,8 @@ output so machine-readable output can be added without breaking terminal use.
   them in prose diagnostics so their boundaries remain unambiguous.
 - JSON inspection reuses the public result models, writes data only to stdout,
   keeps diagnostics on stderr, emits no ANSI, and preserves human-mode exit
-  semantics. Do not add JSON to streaming commands without a defined protocol.
+  semantics. Finite readiness results follow the same rule. Do not add JSON to
+  streaming commands without a defined protocol.
 
 ### Python API
 
@@ -105,6 +106,8 @@ output so machine-readable output can be added without breaking terminal use.
   outcomes remain structured results.
 - API lifecycle methods call the same control functions as the CLI. Do not
   reproduce process ownership, cleanup, or PID identity logic in the wrapper.
+- API and CLI configured waits share one task-aware implementation and the same
+  readiness engine used by stack startup.
 
 ### Logging
 
@@ -135,8 +138,11 @@ output so machine-readable output can be added without breaking terminal use.
   interval are bounded and use a monotonic clock.
 - A task exiting before readiness is a failure. Probe failures are retryable
   until the overall timeout; they should not emit repeated tracebacks.
-- Reuse readiness primitives for future waiting or hook interfaces instead of
-  adding parallel URL, socket, or command implementations.
+- Standalone waiting never starts, stops, or claims a process. Configured waits
+  verify the recorded process identity; direct HTTP, TCP, and command waits do
+  not require a project configuration.
+- All readiness interfaces reuse the same validation, probes, and monotonic
+  deadline implementation.
 
 ## Validation
 

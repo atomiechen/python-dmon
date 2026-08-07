@@ -143,6 +143,40 @@ dmon stop --meta-file /tmp/adhoc.meta.json
 
 No config is required. Child options work without `--`; adding it remains valid.
 
+## Standalone readiness waiting
+
+Configured waits observe an already managed task and do not change its
+lifecycle:
+
+```sh
+dmon start stack-db stack-api
+dmon wait stack-db stack-api
+dmon wait stack-db --format json
+dmon status stack-db
+dmon stop stack-api stack-db
+```
+
+Both tasks must report ready, remain running after each wait, and stop only when
+explicitly requested. Direct probes work without task metadata:
+
+```sh
+dmon start stack-api
+dmon wait --http http://127.0.0.1:48732/health
+dmon wait --timeout 0.5 --tcp 127.0.0.1:48733; echo "exit=$?"  # expected: non-zero
+dmon wait --timeout 1 --command -- python -c "raise SystemExit(0)"
+dmon wait --timeout 0.5 --command -- python -c "raise SystemExit(1)"; echo "exit=$?"
+dmon stop stack-api
+```
+
+The successful probes return zero; the refused TCP connection and failing
+command return one after their timeout without a traceback. Finally run the
+following and press Ctrl-C; it must return 130, print one interruption message,
+and leave no sleeping child process:
+
+```sh
+dmon wait --timeout 30 --command -- python -c "import time; time.sleep(30)"
+```
+
 ## Supervised stacks
 
 ### Healthy startup and Ctrl-C cleanup

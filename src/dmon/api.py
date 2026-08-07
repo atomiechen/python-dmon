@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from io import StringIO
+import math
 import os
 from pathlib import Path
 from typing import Iterator, Optional, Sequence, Tuple, Union
@@ -9,19 +10,23 @@ from typing import Iterator, Optional, Sequence, Tuple, Union
 from .config import fill_default_paths, get_task_config, load_config
 from .constants import DEFAULT_META_DIR, STACK_META_SUFFIX
 from .control import (
+    check_running,
     diagnostic_output,
     restart,
     start_single_result,
     stop_single,
     task_snapshot,
+    task_environment,
 )
 from .results import (
     ActionResult,
     BatchResult,
     StackResult,
     TaskResult,
+    WaitResult,
 )
 from .inspection import inspect_stack, inspect_task
+from .readiness import ready_spec, wait_for_readiness
 from .types import DmonMeta
 
 
@@ -139,6 +144,69 @@ class Dmon:
                 for path in sorted(meta_dir.glob(f"*{STACK_META_SUFFIX}")):
                     name = path.name[: -len(STACK_META_SUFFIX)]
                     results.append(inspect_stack(name, path, require_running=False))
+        return tuple(results)
+
+    def wait(
+        self,
+        *tasks: str,
+        timeout: Optional[float] = None,
+        interval: Optional[float] = None,
+    ) -> Tuple[WaitResult, ...]:
+        for name, value in (("timeout", timeout), ("interval", interval)):
+            if value is not None and (
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+                or not math.isfinite(value)
+                or value <= 0
+            ):
+                raise DmonConfigError(f"{name} must be finite and greater than zero")
+        names, configs, _ = self._tasks(tasks)
+        results = []
+        with self._operation():
+            for name, config in zip(names, configs):
+                if not config.ready:
+                    results.append(
+                        WaitResult(
+                            name,
+                            False,
+                            "invalid",
+                            0.0,
+                            0,
+                            "task has no readiness probe",
+                        )
+                    )
+                    continue
+                try:
+                    meta = DmonMeta.load(config.meta_path)
+                except (OSError, ValueError, TypeError) as error:
+                    results.append(
+                        WaitResult(name, False, "metadata-error", 0.0, 0, str(error))
+                    )
+                    continue
+                if meta is None:
+                    results.append(
+                        WaitResult(
+                            name,
+                            False,
+                            "not-running",
+                            0.0,
+                            0,
+                            "task metadata not found",
+                        )
+                    )
+                    continue
+                spec = ready_spec(config.ready, timeout=timeout, interval=interval)
+                results.append(
+                    wait_for_readiness(
+                        name,
+                        spec,
+                        cwd=config.cwd,
+                        env=task_environment(config),
+                        process_running=lambda meta=meta: check_running(
+                            meta.pid, meta.create_time
+                        ),
+                    )
+                )
         return tuple(results)
 
     def _tasks(self, tasks: Sequence[str]):

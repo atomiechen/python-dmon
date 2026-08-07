@@ -14,6 +14,18 @@ from dmon.types import DmonTaskConfig
 
 
 class CliTest(unittest.TestCase):
+    def test_wait_interrupt_returns_130_without_a_traceback(self) -> None:
+        output = StringIO()
+        with patch.object(sys, "argv", ["dmon", "wait", "--command", "probe"]), patch(
+            "dmon.cli.run_direct_wait", side_effect=KeyboardInterrupt
+        ):
+            with redirect_stderr(output), self.assertRaises(SystemExit) as result:
+                main()
+
+        self.assertEqual(result.exception.code, 130)
+        self.assertIn("Readiness wait interrupted", output.getvalue())
+        self.assertNotIn("Traceback", output.getvalue())
+
     def test_run_preserves_child_options_with_or_without_separator(self) -> None:
         for separator in ([], ["--"]):
             with self.subTest(

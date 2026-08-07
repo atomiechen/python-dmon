@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any, Dict
 
-from .results import StackResult, TaskResult
+from .results import StackResult, TaskResult, WaitResult
 
 
 def task_result_data(result: TaskResult) -> Dict[str, Any]:
@@ -22,3 +22,7 @@ def stack_result_data(result: StackResult) -> Dict[str, Any]:
         "error": result.error or None,
         "snapshot": asdict(result.snapshot) if result.snapshot is not None else None,
     }
+
+
+def wait_result_data(result: WaitResult) -> Dict[str, Any]:
+    return {"ok": result.ready, **asdict(result)}
