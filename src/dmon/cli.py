@@ -2,10 +2,11 @@ import argparse
 import os
 from pathlib import Path
 import shlex
+import sys
 
 from colorama import just_fix_windows_console
 
-from .config import check_name_in_config, get_task_config, load_config
+from .config import check_name_in_config, get_stack_config, get_task_config, load_config
 from .control import (
     execute,
     get_meta_paths,
@@ -23,6 +24,7 @@ from .constants import (
     ROTATE_LOG_PATH_TEMPLATE,
 )
 from .types import DmonTaskConfig
+from .supervisor import up
 
 
 def get_version():
@@ -209,8 +211,19 @@ def main():
         nargs="?",
     )
 
+    sp_up = subparsers.add_parser(
+        "up",
+        help="Run a configured stack in the foreground",
+        description="Start a stack atomically, monitor it, and stop all tasks together",
+    )
+    sp_up.add_argument(
+        "stack",
+        help="Configured stack name (default: default_stack or the only stack)",
+        nargs="?",
+    )
+
     # add custom config file option
-    for sp in [sp_start, sp_stop, sp_restart, sp_status, sp_exec]:
+    for sp in [sp_start, sp_stop, sp_restart, sp_status, sp_exec, sp_up]:
         sp.add_argument(
             "-c",
             "--config",
@@ -240,15 +253,7 @@ def main():
                 sp.error(
                     f"'--meta-file' and '--log-file' can only be specified when {args.command}ing a single task"
                 )
-        # fill in default values if not provided
-        for task, task_cfg in zip(tasks, task_cfgs):
-            task_cfg.meta_path = task_cfg.meta_path or META_PATH_TEMPLATE.format(
-                task=task
-            )
-            task_cfg.log_path = task_cfg.log_path or LOG_PATH_TEMPLATE.format(task=task)
-            task_cfg.rotate_log_path = (
-                task_cfg.rotate_log_path or ROTATE_LOG_PATH_TEMPLATE.format(task=task)
-            )
+        fill_default_paths(tasks, task_cfgs)
         if args.command == "start":
             sp.exit(start(task_cfgs))
         else:
@@ -260,6 +265,19 @@ def main():
         except Exception as e:
             sp_exec.error(str(e))
         sp_exec.exit(execute(task_cfgs[0]))
+    elif args.command == "up":
+        try:
+            _, task_cfgs, cfg_path = get_stack_config(args.stack, args.config)
+            os.chdir(cfg_path.parent)
+        except Exception as e:
+            sp_up.error(str(e))
+        fill_default_paths([config.task for config in task_cfgs], task_cfgs)
+        try:
+            exit_code = up(task_cfgs)
+        except Exception as e:
+            print(f"Stack supervision failed: {e}", file=sys.stderr)
+            exit_code = 1
+        sp_up.exit(exit_code)
     elif args.command in ["stop", "status"]:
         sp = sp_stop if args.command == "stop" else sp_status
         meta_paths = []
@@ -336,6 +354,15 @@ def main():
     else:
         parser.print_help()
         parser.exit(1)
+
+
+def fill_default_paths(tasks, task_cfgs) -> None:
+    for task, task_cfg in zip(tasks, task_cfgs):
+        task_cfg.meta_path = task_cfg.meta_path or META_PATH_TEMPLATE.format(task=task)
+        task_cfg.log_path = task_cfg.log_path or LOG_PATH_TEMPLATE.format(task=task)
+        task_cfg.rotate_log_path = (
+            task_cfg.rotate_log_path or ROTATE_LOG_PATH_TEMPLATE.format(task=task)
+        )
 
 
 if __name__ == "__main__":

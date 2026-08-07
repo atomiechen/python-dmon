@@ -113,6 +113,44 @@ successful tasks running if another task cannot start. The command returns a
 non-zero status and prints a summary naming the failed tasks. This is useful for
 independent background services and does not provide atomic stack semantics.
 
+For related services that should start and stop as one unit, define a stack and
+run it in the foreground:
+
+```yaml
+tasks:
+  database:
+    cmd: [python, database.py]
+    ready:
+      tcp: {host: 127.0.0.1, port: 5432}
+      timeout: 20
+  api:
+    cmd: [python, api.py]
+    depends_on: [database]
+    ready:
+      http: http://127.0.0.1:8000/health
+  worker:
+    cmd: [python, worker.py]
+    depends_on: [api]
+
+stacks:
+  dev: [api, worker]
+default_stack: dev
+```
+
+```sh
+dmon up dev
+# Or omit the name when default_stack (or only one stack) is configured
+dmon up
+```
+
+`dmon up` starts dependencies in order and waits for each task's optional
+readiness probe. A startup failure, readiness timeout, unexpected task exit,
+Ctrl-C, or SIGTERM stops every task started by that invocation in reverse order.
+Task output remains in each task's configured `log_path` rather than being
+combined in the terminal. Docker Compose is still appropriate when container
+behavior itself must be tested. `dmon up` has no detached mode or matching
+`down` command; use `dmon start` for independently managed background tasks.
+
 Or use `--all` to operate on all tasks:
 
 ```sh
@@ -213,7 +251,15 @@ tasks:
     rotate_log_max_size: 5  # max rotation log file size in MB
     # rotate_log_backup_count: 10  # optional; omit to retain all runner log archives
     meta_path: ".dmon/<task>.meta.json"  # path to meta file
+    depends_on: [another_task]  # dependency order used by `dmon up`
+    ready:  # optional; exactly one of http, tcp, or command
+      command: [python, healthcheck.py]
+      timeout: 30  # total seconds to wait (default: 30)
+      interval: 0.2  # seconds between attempts (default: 0.2)
 default_task: your_task_name  # the default task name
+stacks:
+  dev: [your_task_name]
+default_stack: dev
 ```
 
 In TOML, write like this:

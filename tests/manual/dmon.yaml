@@ -21,7 +21,7 @@ tasks:
     log_rotate: true
     log_max_size: 0.01
     rotate_log_path: logs/burst.rotate.log
-    rotate_log_max_size: 0.02
+    rotate_log_max_size: 0.001
 
   stack-db:
     cmd: [python, -u, services/ready_server.py, tcp, "48731"]
@@ -46,6 +46,14 @@ tasks:
     log_path: logs/delayed-failure.log
     depends_on: [stack-db]
 
+  never-ready:
+    cmd: [python, -u, services/heartbeat.py]
+    log_path: logs/never-ready.log
+    ready:
+      command: [python, -c, "raise SystemExit(1)"]
+      timeout: 0.5
+      interval: 0.1
+
   missing: [dmon-command-that-does-not-exist]
 
 default_task: heartbeat
@@ -53,4 +61,5 @@ stacks:
   healthy: [stack-worker]
   startup-failure: [stack-db, missing]
   runtime-failure: [delayed-failure]
+  readiness-timeout: [never-ready]
 default_stack: healthy

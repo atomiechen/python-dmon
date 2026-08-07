@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import os
 from pathlib import Path
 import shlex
@@ -6,7 +7,7 @@ import signal
 import sys
 import subprocess
 import time
-from typing import List, Sequence
+from typing import List, Optional, Sequence
 
 import psutil
 from termcolor import colored
@@ -14,6 +15,12 @@ from termcolor import colored
 from .constants import DEFAULT_META_DIR, META_SUFFIX, ON_WINDOWS
 from .types import DmonTaskConfig, DmonMeta, PathType
 from .utils import len_ansi, pad_ansi
+
+
+@dataclass(frozen=True)
+class StartResult:
+    exit_code: int
+    meta: Optional[DmonMeta] = None
 
 
 def ensure_meta_dir(meta_path: Path):
@@ -56,7 +63,11 @@ def start(cfgs: Sequence[DmonTaskConfig]):
     return ret
 
 
-def start_single(cfg: DmonTaskConfig):
+def start_single(cfg: DmonTaskConfig) -> int:
+    return start_single_result(cfg).exit_code
+
+
+def start_single_result(cfg: DmonTaskConfig) -> StartResult:
     meta_path = Path(cfg.meta_path).resolve()
     log_path = Path(cfg.log_path).resolve()
     cwd = Path(cfg.cwd).resolve()
@@ -72,7 +83,7 @@ def start_single(cfg: DmonTaskConfig):
             ),
             file=sys.stderr,
         )
-        return 1
+        return StartResult(1)
     if existing_meta and existing_meta.state == "starting":
         print(
             colored(
@@ -86,7 +97,7 @@ def start_single(cfg: DmonTaskConfig):
             "If the earlier start was interrupted, run 'dmon stop' to remove its reservation.",
             file=sys.stderr,
         )
-        return 1
+        return StartResult(1)
     if existing_meta and check_running(existing_meta.pid, existing_meta.create_time):
         print(
             f"{colored('Start failed: meta file already exists', color='red', attrs=['bold'])}",
@@ -97,7 +108,7 @@ def start_single(cfg: DmonTaskConfig):
             "\nRun 'dmon status' / 'dmon list' to check, or 'dmon stop' to stop it.",
             file=sys.stderr,
         )
-        return 1
+        return StartResult(1)
     if existing_meta:
         print(
             colored(
@@ -154,7 +165,7 @@ def start_single(cfg: DmonTaskConfig):
             ),
             file=sys.stderr,
         )
-        return 1
+        return StartResult(1)
 
     try:
         if cfg.log_rotate:
@@ -230,7 +241,7 @@ def start_single(cfg: DmonTaskConfig):
             ),
             file=sys.stderr,
         )
-        return 1
+        return StartResult(1)
 
     meta.pid = proc.pid
     meta.state = "running"
@@ -264,10 +275,10 @@ def start_single(cfg: DmonTaskConfig):
             ),
             file=sys.stderr,
         )
-        return 1
+        return StartResult(1)
 
     print_status(meta)
-    return 0
+    return StartResult(0, meta)
 
 
 def task_environment(cfg: DmonTaskConfig):

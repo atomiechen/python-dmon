@@ -19,6 +19,7 @@ from dmon.control import (
     list_processes,
     start,
     start_single,
+    start_single_result,
     status,
     stop_single,
     terminate_process_tree,
@@ -69,6 +70,29 @@ class ControlTest(unittest.TestCase):
             self.assertIn("Start failed for task 'missing'", output.getvalue())
             self.assertNotIn("Traceback", output.getvalue())
             self.assertFalse(Path(config.meta_path).exists())
+
+    def test_start_result_returns_the_managed_process_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = self.make_config(
+                root,
+                "captured",
+                [sys.executable, "-c", "import time; time.sleep(60)"],
+            )
+            try:
+                with redirect_stderr(StringIO()):
+                    result = start_single_result(config)
+                self.assertEqual(result.exit_code, 0)
+                self.assertIsNotNone(result.meta)
+                assert result.meta is not None
+                persisted = DmonMeta.load(config.meta_path)
+                self.assertIsNotNone(persisted)
+                assert persisted is not None
+                self.assertEqual(result.meta.pid, persisted.pid)
+                self.assertEqual(result.meta.create_time, persisted.create_time)
+                self.assertTrue(check_running(result.meta.pid, result.meta.create_time))
+            finally:
+                self.cleanup_config(config)
 
     def test_metadata_write_failure_stops_the_started_process(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

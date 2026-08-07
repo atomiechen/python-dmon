@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import redirect_stderr
+from io import StringIO
 import os
 from pathlib import Path
 import sys
@@ -8,6 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from dmon.cli import main
+from dmon.types import DmonTaskConfig
 
 
 class CliTest(unittest.TestCase):
@@ -66,6 +69,48 @@ class CliTest(unittest.TestCase):
                 )
             finally:
                 os.chdir(original_cwd)
+
+    def test_up_loads_stack_from_config_directory(self) -> None:
+        original_cwd = Path.cwd()
+        with tempfile.TemporaryDirectory() as temporary:
+            try:
+                root = Path(temporary)
+                config_path = root / "project" / "dmon.yaml"
+                config_path.parent.mkdir()
+                task = DmonTaskConfig(task="api", cmd=["python", "api.py"])
+                with patch.object(
+                    sys,
+                    "argv",
+                    ["dmon", "up", "dev", "-c", str(config_path)],
+                ), patch(
+                    "dmon.cli.get_stack_config",
+                    return_value=("dev", [task], config_path),
+                ), patch("dmon.cli.up", return_value=0) as mocked_up:
+                    with self.assertRaises(SystemExit) as result:
+                        main()
+
+                self.assertEqual(result.exception.code, 0)
+                self.assertTrue(Path.cwd().samefile(config_path.parent))
+                mocked_up.assert_called_once_with([task])
+                self.assertEqual(Path(task.meta_path), Path(".dmon/api.meta.json"))
+                self.assertEqual(Path(task.log_path), Path("logs/api.log"))
+            finally:
+                os.chdir(original_cwd)
+
+    def test_up_reports_unexpected_errors_without_a_traceback(self) -> None:
+        task = DmonTaskConfig(task="api", cmd=["python", "api.py"])
+        config_path = Path.cwd() / "dmon.yaml"
+        output = StringIO()
+        with patch.object(sys, "argv", ["dmon", "up", "dev"]), patch(
+            "dmon.cli.get_stack_config",
+            return_value=("dev", [task], config_path),
+        ), patch("dmon.cli.up", side_effect=RuntimeError("simulated failure")):
+            with redirect_stderr(output), self.assertRaises(SystemExit) as result:
+                main()
+
+        self.assertEqual(result.exception.code, 1)
+        self.assertIn("Stack supervision failed: simulated failure", output.getvalue())
+        self.assertNotIn("Traceback", output.getvalue())
 
 
 if __name__ == "__main__":

@@ -45,6 +45,10 @@ class DmonTaskConfig:
     """Number of runner log archives to retain; None keeps all archives"""
     meta_path: str = ""
     """Path to meta file"""
+    depends_on: List[str] = field(default_factory=list)
+    """Tasks that must become ready before this task starts"""
+    ready: Dict[str, object] = field(default_factory=dict)
+    """Optional readiness probe configuration"""
 
 
 @dataclass

@@ -16,12 +16,24 @@ dmon --version
 python reset.py
 ```
 
+PowerShell setup:
+
+```powershell
+uv sync --locked --dev
+Set-Location tests/manual
+$repo = git rev-parse --show-toplevel
+$env:Path = "$repo\.venv\Scripts;$env:Path"
+dmon --version
+python reset.py
+```
+
 Run `python reset.py` between scenarios. It stops recorded tasks before deleting
 runtime state. Use `python reset.py --force` only after inspecting a failure and
 confirming no test process should be preserved.
 
-The forced process-group scenario is POSIX-specific. Run the remaining scenarios
-on Windows and rely on the Windows CI lifecycle tests for native process cleanup.
+The examples below use POSIX exit-code syntax; use `$LASTEXITCODE` in PowerShell.
+The forced process-group and `/tmp` scenarios are POSIX-specific. Windows-native
+process cleanup remains covered by the automated Windows CI matrix.
 
 ## Individual task lifecycle
 
@@ -143,6 +155,21 @@ Wait for every task to report ready, then press Ctrl-C. Tasks must stop in rever
 dependency order and leave no metadata. Output should distinguish readiness,
 runtime logs, shutdown, and errors without relying only on color.
 
+Repeat once with two terminals. The `exec` keeps the printed shell PID when it
+becomes `dmon`, so there is no process-search ambiguity:
+
+```sh
+# Terminal 1
+sh -c 'echo "dmon up PID=$$"; exec dmon up healthy'
+
+# Terminal 2: replace 12345 with the PID printed above
+kill -TERM 12345
+```
+
+It must perform the same reverse-order cleanup without a traceback. This is a
+signal test, not a supported detached mode; `dmon up` must remain supervised in
+the foreground.
+
 ### Startup rollback
 
 ```sh
@@ -162,6 +189,16 @@ dmon status stack-db; echo "exit=$?"
 
 The stack first becomes ready; then `delayed-failure` exits. The command returns
 non-zero and cleans the remaining task.
+
+### Readiness timeout
+
+```sh
+dmon up readiness-timeout; echo "exit=$?"
+dmon status never-ready; echo "exit=$?"
+```
+
+The probe must retry quietly until the configured deadline, then report one
+actionable timeout, return non-zero, and stop the task without stale metadata.
 
 ## Presentation checklist
 

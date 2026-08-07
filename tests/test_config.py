@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from dmon.config import (
     check_name_in_config,
+    get_stack_config,
     get_task_config,
     load_config,
     validate_task,
@@ -14,6 +15,11 @@ from dmon.config import (
 
 
 class ConfigTest(unittest.TestCase):
+    def write_config(self, root: Path, text: str) -> Path:
+        path = root / "dmon.yaml"
+        path.write_text(text, encoding="utf-8")
+        return path
+
     def test_empty_yaml_is_an_empty_config(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "dmon.yaml"
@@ -47,6 +53,95 @@ class ConfigTest(unittest.TestCase):
             with self.subTest(field=field):
                 config = validate_task({"cmd": ["app"], field: 2}, "app")
                 self.assertEqual(getattr(config, field), 2)
+
+    def test_stack_orders_dependencies_before_dependents(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = self.write_config(
+                Path(temporary),
+                """
+tasks:
+  api:
+    cmd: [python, api.py]
+    depends_on: [DATABASE]
+  database: [python, database.py]
+  worker:
+    cmd: [python, worker.py]
+    depends_on: [api]
+stacks:
+  DEV: [worker]
+""",
+            )
+            name, configs, returned_path = get_stack_config("DEV", str(path))
+            self.assertEqual(name, "dev")
+            self.assertEqual(
+                [config.task for config in configs], ["database", "api", "worker"]
+            )
+            self.assertEqual(returned_path, path.resolve())
+
+    def test_stack_rejects_dependency_cycles(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = self.write_config(
+                Path(temporary),
+                """
+tasks:
+  first:
+    cmd: echo first
+    depends_on: [second]
+  second:
+    cmd: echo second
+    depends_on: [first]
+stacks:
+  broken: [first]
+""",
+            )
+            with self.assertRaisesRegex(ValueError, "first -> second -> first"):
+                get_stack_config("broken", str(path))
+
+    def test_stack_rejects_missing_dependencies(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = self.write_config(
+                Path(temporary),
+                """
+tasks:
+  api:
+    cmd: echo api
+    depends_on: [database]
+stacks:
+  broken: [api]
+""",
+            )
+            with self.assertRaisesRegex(ValueError, "database.*not defined"):
+                get_stack_config("broken", str(path))
+
+    def test_ready_probe_requires_exactly_one_supported_probe(self) -> None:
+        for ready in ({}, {"http": "http://localhost", "command": ["true"]}):
+            with self.subTest(ready=ready), self.assertRaisesRegex(
+                TypeError, "exactly one"
+            ):
+                validate_task({"cmd": ["app"], "ready": ready}, "app")
+
+    def test_http_ready_probe_requires_an_http_url(self) -> None:
+        for url in ("", "localhost:8000", "file:///tmp/ready", "http://:bad"):
+            with self.subTest(url=url), self.assertRaisesRegex(TypeError, "URL"):
+                validate_task({"cmd": ["app"], "ready": {"http": url}}, "app")
+
+        config = validate_task(
+            {"cmd": ["app"], "ready": {"http": "https://localhost/health"}},
+            "app",
+        )
+        self.assertEqual(config.ready["http"], "https://localhost/health")
+
+    def test_ready_probe_validates_tcp_shape_and_timing(self) -> None:
+        for ready in (
+            {"tcp": {"host": "127.0.0.1", "port": 70000}},
+            {"tcp": {"host": "127.0.0.1", "port": True}},
+            {"command": ["true"], "timeout": True},
+            {"command": ["true"], "timeout": float("nan")},
+            {"command": ["true"], "interval": float("inf")},
+            {"command": []},
+        ):
+            with self.subTest(ready=ready), self.assertRaises(TypeError):
+                validate_task({"cmd": ["app"], "ready": ready}, "app")
 
 
 if __name__ == "__main__":

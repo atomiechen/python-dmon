@@ -61,8 +61,10 @@ output so machine-readable output can be added without breaking terminal use.
   remain stable.
 - Paths and commands from a config file resolve relative to that file, not the
   caller's current directory. Ad-hoc commands do not require a config file.
-- Terminal color must add meaning without becoming the only way to distinguish
-  a task name, state, warning, or error. Respect non-interactive output.
+- Render task names consistently in bold cyan; use state-appropriate colors for
+  surrounding diagnostics. Color must add meaning without becoming the only way
+  to distinguish a task name, state, warning, or error. Respect non-interactive
+  output.
 
 ### Logging
 

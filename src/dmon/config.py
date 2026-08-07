@@ -1,6 +1,8 @@
+import math
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple, Union, cast
+from urllib.parse import urlsplit
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -171,11 +173,86 @@ def validate_task(task, name: str) -> DmonTaskConfig:
             if not isinstance(task["meta_path"], str):
                 raise TypeError(f"Task '{name}' 'meta_path' field must be a string")
             ret.meta_path = task["meta_path"]
+
+        if "depends_on" in task:
+            if not isinstance(task["depends_on"], list) or not all(
+                isinstance(item, str) and item for item in task["depends_on"]
+            ):
+                raise TypeError(
+                    f"Task '{name}' 'depends_on' field must be a list of non-empty task names"
+                )
+            ret.depends_on = [item.lower() for item in task["depends_on"]]
+
+        if "ready" in task:
+            ret.ready = validate_ready(task["ready"], name)
     else:
         raise TypeError(
             f"Task '{name}' must be a string, list of strings, or a table; got {type(task)}"
         )
     return ret
+
+
+def validate_ready(ready, name: str) -> Dict[str, object]:
+    if not isinstance(ready, dict):
+        raise TypeError(f"Task '{name}' 'ready' field must be a table")
+    allowed = {"http", "tcp", "command", "timeout", "interval"}
+    unknown = set(ready) - allowed
+    if unknown:
+        raise TypeError(
+            f"Task '{name}' 'ready' field has unknown keys: {', '.join(sorted(unknown))}"
+        )
+    probes = [key for key in ("http", "tcp", "command") if key in ready]
+    if len(probes) != 1:
+        raise TypeError(
+            f"Task '{name}' 'ready' field must define exactly one of: http, tcp, command"
+        )
+    if "http" in ready:
+        url = ready["http"]
+        if not isinstance(url, str) or not url:
+            raise TypeError(
+                f"Task '{name}' readiness 'http' value must be a URL string"
+            )
+        try:
+            parsed = urlsplit(url)
+            parsed.port
+        except ValueError as error:
+            raise TypeError(
+                f"Task '{name}' readiness 'http' value must be a valid HTTP(S) URL"
+            ) from error
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise TypeError(
+                f"Task '{name}' readiness 'http' value must be a valid HTTP(S) URL"
+            )
+    if "command" in ready:
+        command = validate_cmd_type(ready["command"], f"{name}.ready")
+        if not command:
+            raise TypeError(f"Task '{name}' readiness 'command' must not be empty")
+    if "tcp" in ready:
+        tcp = ready["tcp"]
+        if (
+            not isinstance(tcp, dict)
+            or not isinstance(tcp.get("host"), str)
+            or not tcp.get("host")
+            or not isinstance(tcp.get("port"), int)
+            or isinstance(tcp.get("port"), bool)
+            or not 1 <= tcp["port"] <= 65535
+            or set(tcp) != {"host", "port"}
+        ):
+            raise TypeError(
+                f"Task '{name}' readiness 'tcp' value must contain a host string and valid port"
+            )
+    for key, default in (("timeout", 30.0), ("interval", 0.2)):
+        value = ready.get(key, default)
+        if (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not math.isfinite(value)
+            or value <= 0
+        ):
+            raise TypeError(
+                f"Task '{name}' readiness '{key}' value must be a positive number"
+            )
+    return cast(Dict[str, object], ready)
 
 
 def get_task_config(
@@ -226,6 +303,85 @@ def get_task_config(
         ret_names.append(name)
         ret_tasks.append(task)
     return ret_names, ret_tasks, path
+
+
+def get_stack_config(
+    name: Optional[str], cfg_path: Optional[str] = None
+) -> Tuple[str, List[DmonTaskConfig], Path]:
+    cfg, path = load_config(cfg_path)
+    tasks = cfg.get("tasks", {})
+    stacks = cfg.get("stacks", {})
+    if not isinstance(tasks, dict):
+        raise TypeError("'tasks' must be a table")
+    if not isinstance(stacks, dict):
+        raise TypeError("'stacks' must be a table")
+
+    normalized_stacks = {}
+    for stack_name, stack in stacks.items():
+        if not isinstance(stack_name, str):
+            raise TypeError("Stack names must be strings")
+        normalized = stack_name.lower()
+        if normalized in normalized_stacks:
+            raise ValueError(
+                f"Duplicate stack name after normalization: '{normalized}'"
+            )
+        normalized_stacks[normalized] = stack
+    if name is None:
+        default_stack = cfg.get("default_stack")
+        if default_stack is not None:
+            if not isinstance(default_stack, str) or not default_stack:
+                raise TypeError("'default_stack' must be a non-empty string")
+            name = default_stack
+        elif len(normalized_stacks) == 1:
+            name = next(iter(normalized_stacks))
+        elif not normalized_stacks:
+            raise ValueError(f"No stack found in {path}")
+        else:
+            raise ValueError(f"Multiple stacks found in {path}; please specify one.")
+    name = name.lower()
+    if name not in normalized_stacks:
+        raise ValueError(f"Stack '{name}' not found in {path}")
+    selected = normalized_stacks[name]
+    if (
+        not isinstance(selected, list)
+        or not selected
+        or not all(isinstance(item, str) and item for item in selected)
+    ):
+        raise TypeError(f"Stack '{name}' must be a non-empty list of task names")
+
+    validated = {}
+    for task_name, task in tasks.items():
+        if not isinstance(task_name, str):
+            raise TypeError("Task names must be strings")
+        normalized = task_name.lower()
+        if normalized in validated:
+            raise ValueError(f"Duplicate task name after normalization: '{normalized}'")
+        validated[normalized] = validate_task(task, normalized)
+    order: List[str] = []
+    visiting: List[str] = []
+    visited = set()
+
+    def visit(task_name: str) -> None:
+        task_name = task_name.lower()
+        if task_name in visited:
+            return
+        if task_name in visiting:
+            cycle = " -> ".join([*visiting[visiting.index(task_name) :], task_name])
+            raise ValueError(f"Task dependency cycle in stack '{name}': {cycle}")
+        if task_name not in validated:
+            raise ValueError(
+                f"Task '{task_name}' referenced by stack '{name}' is not defined"
+            )
+        visiting.append(task_name)
+        for dependency in validated[task_name].depends_on:
+            visit(dependency)
+        visiting.pop()
+        visited.add(task_name)
+        order.append(task_name)
+
+    for task_name in selected:
+        visit(task_name)
+    return name, [validated[task_name] for task_name in order], path
 
 
 def check_name_in_config(name: str) -> bool:

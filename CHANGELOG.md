@@ -5,6 +5,13 @@ All notable changes to python-dmon will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 
+## [0.4.0] - Unreleased
+
+### Added
+
+- Add `dmon up` for supervised, fail-fast stacks with dependency ordering, readiness probes, runtime monitoring, and automatic cleanup.
+- Add HTTP, TCP, and command readiness probes.
+
 
 ## [0.3.1] - 2026-08-07
 
