@@ -1,0 +1,56 @@
+tasks:
+  heartbeat:
+    cmd: [python, -u, services/heartbeat.py]
+    log_path: logs/heartbeat.log
+
+  short:
+    cmd: [python, -u, services/short.py]
+    log_path: logs/short.log
+
+  tree:
+    cmd: [python, -u, services/process_tree.py, state/tree.pids]
+    log_path: logs/tree.log
+
+  stubborn:
+    cmd: [python, -u, services/stubborn_tree.py, state/stubborn.pids]
+    log_path: logs/stubborn.log
+
+  burst:
+    cmd: [python, -u, services/burst.py]
+    log_path: logs/burst.log
+    log_rotate: true
+    log_max_size: 0.01
+    rotate_log_path: logs/burst.rotate.log
+    rotate_log_max_size: 0.02
+
+  stack-db:
+    cmd: [python, -u, services/ready_server.py, tcp, "48731"]
+    log_path: logs/stack-db.log
+    ready:
+      tcp: {host: 127.0.0.1, port: 48731}
+
+  stack-api:
+    cmd: [python, -u, services/ready_server.py, http, "48732"]
+    log_path: logs/stack-api.log
+    depends_on: [stack-db]
+    ready:
+      http: http://127.0.0.1:48732/health
+
+  stack-worker:
+    cmd: [python, -u, services/heartbeat.py]
+    log_path: logs/stack-worker.log
+    depends_on: [stack-api]
+
+  delayed-failure:
+    cmd: [python, -u, services/delayed_failure.py]
+    log_path: logs/delayed-failure.log
+    depends_on: [stack-db]
+
+  missing: [dmon-command-that-does-not-exist]
+
+default_task: heartbeat
+stacks:
+  healthy: [stack-worker]
+  startup-failure: [stack-db, missing]
+  runtime-failure: [delayed-failure]
+default_stack: healthy

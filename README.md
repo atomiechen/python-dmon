@@ -243,6 +243,13 @@ that task again removes its stale metadata automatically. `dmon stop` terminates
 the complete process tree and also cleans stale metadata left by an exited task.
 
 
+## Development
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture, behavioral contracts,
+validation, and the release workflow. Process, signal, log-rotation, and stack
+changes must also pass the reproducible [manual test lab](tests/manual/README.md).
+
+
 ## License
 
 [python-dmon](https://github.com/atomiechen/python-dmon) © 2025 by [Atomie CHEN](https://github.com/atomiechen) is licensed under the [MIT License](https://github.com/atomiechen/python-dmon/blob/main/LICENSE).
