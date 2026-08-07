@@ -85,13 +85,22 @@ class CliTest(unittest.TestCase):
                 ), patch(
                     "dmon.cli.get_stack_config",
                     return_value=("dev", [task], config_path),
-                ), patch("dmon.cli.up", return_value=0) as mocked_up:
+                ), patch(
+                    "dmon.cli.start_foreground_stack", return_value=0
+                ) as mocked_up:
                     with self.assertRaises(SystemExit) as result:
                         main()
 
                 self.assertEqual(result.exception.code, 0)
                 self.assertTrue(Path.cwd().samefile(config_path.parent))
-                mocked_up.assert_called_once_with([task], abort_on_exit=False)
+                mocked_up.assert_called_once_with(
+                    "dev",
+                    [task],
+                    config_path,
+                    Path(".dmon/dev.stack.json"),
+                    Path("logs/dev.stack.log"),
+                    abort_on_exit=False,
+                )
                 self.assertEqual(Path(task.meta_path), Path(".dmon/api.meta.json"))
                 self.assertEqual(Path(task.log_path), Path("logs/api.log"))
             finally:
@@ -138,7 +147,10 @@ class CliTest(unittest.TestCase):
         with patch.object(sys, "argv", ["dmon", "stack", "up", "dev"]), patch(
             "dmon.cli.get_stack_config",
             return_value=("dev", [task], config_path),
-        ), patch("dmon.cli.up", side_effect=RuntimeError("simulated failure")):
+        ), patch(
+            "dmon.cli.start_foreground_stack",
+            side_effect=RuntimeError("simulated failure"),
+        ):
             with redirect_stderr(output), self.assertRaises(SystemExit) as result:
                 main()
 

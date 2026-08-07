@@ -157,7 +157,21 @@ runtime logs, shutdown, and errors without relying only on color. New task outpu
 must appear automatically with a task-name prefix; no second `logs -f` command
 should be needed.
 
-Repeat once with two terminals. The `exec` keeps the printed shell PID when it
+Repeat once and, while Terminal 1 remains attached, run these in Terminal 2:
+
+```sh
+dmon stack status healthy
+dmon stack list
+dmon stack restart healthy; echo "restart_exit=$?"
+dmon stack down healthy
+```
+
+Status and list must identify `foreground` mode and all member tasks. Restart
+must be rejected without changing the running stack. Down must request clean
+reverse-order shutdown; Terminal 1 should then exit successfully with no stale
+metadata.
+
+Repeat once more with two terminals. The `exec` keeps the printed shell PID when it
 becomes `dmon`, so there is no process-search ambiguity:
 
 ```sh

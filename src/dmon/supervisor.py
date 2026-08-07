@@ -355,6 +355,137 @@ def stack_tasks_running(meta: DmonStackMeta) -> bool:
     )
 
 
+def reserve_stack(
+    stack: str,
+    mode: str,
+    config_path: Path,
+    meta_path: Path,
+    log_path: Path,
+    abort_on_exit: bool,
+) -> Optional[DmonStackMeta]:
+    try:
+        existing = DmonStackMeta.load(meta_path)
+    except (OSError, ValueError, TypeError) as error:
+        print(f"Stack metadata cannot be read: {error}", file=sys.stderr)
+        return None
+    if existing is not None:
+        if stack_process(existing) is not None or stack_tasks_running(existing):
+            message = " is already active; run 'dmon stack down'."
+        else:
+            message = (
+                " has stale metadata; run 'dmon stack down' before starting it again."
+            )
+        print(stack_message(stack, message, "red"), file=sys.stderr)
+        return None
+
+    ensure_meta_dir(meta_path)
+    own_pid = os.getpid()
+    meta = DmonStackMeta(
+        stack=stack,
+        run_id=uuid.uuid4().hex,
+        mode=mode,
+        abort_on_exit=abort_on_exit,
+        state="reserved" if mode == "detached" else "starting",
+        pid=own_pid,
+        create_time=psutil.Process(own_pid).create_time(),
+        config_path=str(config_path.resolve()),
+        log_path=str(log_path.resolve()),
+    )
+    try:
+        meta.dump(meta_path, exclusive=True)
+    except FileExistsError:
+        print(
+            stack_message(stack, " is being started by another dmon process.", "red"),
+            file=sys.stderr,
+        )
+        return None
+    return meta
+
+
+def update_stack_state(
+    meta_path: Path,
+    owner: DmonStackMeta,
+    state: str,
+    started: Sequence[tuple[DmonTaskConfig, DmonMeta]],
+) -> None:
+    current = DmonStackMeta.load(meta_path)
+    if (
+        current is None
+        or current.run_id != owner.run_id
+        or not same_stack_process(current, owner)
+    ):
+        raise RuntimeError(f"{owner.mode} stack ownership metadata was lost")
+    current.state = state
+    current.tasks = [DmonStackTask.from_meta(task) for _, task in started]
+    current.dump(meta_path)
+
+
+def start_foreground_stack(
+    stack: str,
+    configs: Sequence[DmonTaskConfig],
+    config_path: Path,
+    meta_path: Path,
+    log_path: Path,
+    abort_on_exit: bool = False,
+    poll_interval: float = 0.2,
+) -> int:
+    meta_path = meta_path.resolve()
+    stop_path = stack_stop_path(meta_path)
+    meta = reserve_stack(
+        stack,
+        "foreground",
+        config_path,
+        meta_path,
+        log_path,
+        abort_on_exit,
+    )
+    if meta is None:
+        return 1
+
+    def persist(
+        state: str,
+        started: Sequence[tuple[DmonTaskConfig, DmonMeta]],
+    ) -> None:
+        update_stack_state(meta_path, meta, state, started)
+
+    try:
+        result = up(
+            configs,
+            poll_interval=poll_interval,
+            state_callback=persist,
+            stop_requested=lambda: stack_stop_requested(stop_path, meta.run_id),
+            abort_on_exit=abort_on_exit,
+        )
+    except Exception as error:
+        try:
+            current = DmonStackMeta.load(meta_path)
+            if (
+                current is not None
+                and current.run_id == meta.run_id
+                and same_stack_process(current, meta)
+            ):
+                current.state = "failed"
+                current.error = str(error)
+                current.dump(meta_path)
+        except (OSError, ValueError, TypeError):
+            pass
+        raise
+
+    try:
+        current = DmonStackMeta.load(meta_path)
+        if (
+            current is not None
+            and current.run_id == meta.run_id
+            and same_stack_process(current, meta)
+        ):
+            meta_path.unlink(missing_ok=True)
+            stop_path.unlink(missing_ok=True)
+    except (OSError, ValueError, TypeError) as error:
+        print(f"Stack metadata could not be cleaned: {error}", file=sys.stderr)
+        return 1
+    return result
+
+
 def start_detached_stack(
     stack: str,
     configs: Sequence[DmonTaskConfig],
@@ -367,54 +498,16 @@ def start_detached_stack(
     meta_path = meta_path.resolve()
     log_path = log_path.resolve()
     stop_path = stack_stop_path(meta_path)
-    try:
-        existing = DmonStackMeta.load(meta_path)
-    except (OSError, ValueError, TypeError) as error:
-        print(f"Detached stack metadata cannot be read: {error}", file=sys.stderr)
-        return 1
-    if existing is not None:
-        if stack_process(existing) is not None or stack_tasks_running(existing):
-            print(
-                stack_message(
-                    stack,
-                    " is already active; run 'dmon stack down'.",
-                    "red",
-                ),
-                file=sys.stderr,
-            )
-        else:
-            print(
-                stack_message(
-                    stack,
-                    " has stale metadata; run 'dmon stack down' before starting it again.",
-                    "red",
-                ),
-                file=sys.stderr,
-            )
-        return 1
-    ensure_meta_dir(meta_path)
     ensure_log_dir(log_path)
-    meta = DmonStackMeta(
-        stack=stack,
-        run_id=uuid.uuid4().hex,
-        abort_on_exit=abort_on_exit,
-        state="reserved",
-        pid=os.getpid(),
-        create_time=psutil.Process(os.getpid()).create_time(),
-        config_path=str(config_path.resolve()),
-        log_path=str(log_path),
+    meta = reserve_stack(
+        stack,
+        "detached",
+        config_path,
+        meta_path,
+        log_path,
+        abort_on_exit,
     )
-    try:
-        meta.dump(meta_path, exclusive=True)
-    except FileExistsError:
-        print(
-            colored(
-                f"Detached stack '{stack}' is being started by another dmon process.",
-                color="red",
-                attrs=["bold"],
-            ),
-            file=sys.stderr,
-        )
+    if meta is None:
         return 1
 
     try:
@@ -497,7 +590,7 @@ def start_detached_stack(
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
         print("\nCancelling detached stack startup...", file=sys.stderr)
         request_stack_stop(stop_path, meta.run_id)
-        stop_detached_stack(meta_path)
+        stop_stack(meta_path)
         return 1
     finally:
         signal.signal(signal.SIGINT, previous_int)
@@ -509,7 +602,7 @@ def start_detached_stack(
         file=sys.stderr,
     )
     request_stack_stop(stop_path, meta.run_id)
-    stop_detached_stack(meta_path)
+    stop_stack(meta_path)
     return 1
 
 
@@ -591,16 +684,7 @@ def run_detached_stack(meta_path: Path, run_id: str, poll_interval: float = 0.5)
             state: str,
             started: Sequence[tuple[DmonTaskConfig, DmonMeta]],
         ) -> None:
-            current = DmonStackMeta.load(meta_path)
-            if (
-                current is None
-                or current.run_id != run_id
-                or current.pid != os.getpid()
-            ):
-                raise RuntimeError("detached stack ownership metadata was lost")
-            current.state = state
-            current.tasks = [DmonStackTask.from_meta(task) for _, task in started]
-            current.dump(meta_path)
+            update_stack_state(meta_path, meta, state, started)
 
         result = up(
             configs,
@@ -644,16 +728,16 @@ def run_detached_stack(meta_path: Path, run_id: str, poll_interval: float = 0.5)
     return result
 
 
-def stop_detached_stack(meta_path: Path, poll_interval: float = 0.1) -> int:
+def stop_stack(meta_path: Path, poll_interval: float = 0.1) -> int:
     meta_path = meta_path.resolve()
     stop_path = stack_stop_path(meta_path)
     try:
         meta = DmonStackMeta.load(meta_path)
     except (OSError, ValueError, TypeError) as error:
-        print(f"Detached stack metadata cannot be read: {error}", file=sys.stderr)
+        print(f"Stack metadata cannot be read: {error}", file=sys.stderr)
         return 1
     if meta is None:
-        print(f"Detached stack metadata not found: {meta_path}", file=sys.stderr)
+        print(f"Stack metadata not found: {meta_path}", file=sys.stderr)
         return 1
 
     process = stack_process(meta)
@@ -667,7 +751,7 @@ def stop_detached_stack(meta_path: Path, poll_interval: float = 0.1) -> int:
         else:
             print(
                 colored(
-                    f"Detached stack supervisor {meta.pid} did not stop; terminating it.",
+                    f"Stack supervisor {meta.pid} did not stop; terminating it.",
                     color="yellow",
                     attrs=["bold"],
                 ),
@@ -675,7 +759,7 @@ def stop_detached_stack(meta_path: Path, poll_interval: float = 0.1) -> int:
             )
             if terminate_process(process, timeout=2.0) and stack_process(meta):
                 print(
-                    f"Detached stack supervisor {meta.pid} could not be stopped; "
+                    f"Stack supervisor {meta.pid} could not be stopped; "
                     "metadata was preserved.",
                     file=sys.stderr,
                 )
@@ -689,13 +773,13 @@ def stop_detached_stack(meta_path: Path, poll_interval: float = 0.1) -> int:
         ):
             meta = current
     except (OSError, ValueError, TypeError) as error:
-        print(f"Detached stack metadata cannot be read: {error}", file=sys.stderr)
+        print(f"Stack metadata cannot be read: {error}", file=sys.stderr)
         return 1
 
     cleanup_code = cleanup_stack_tasks(meta.tasks)
     if cleanup_code:
         print(
-            f"Detached stack '{meta.stack}' cleanup is incomplete; metadata was preserved.",
+            f"Stack '{meta.stack}' cleanup is incomplete; metadata was preserved.",
             file=sys.stderr,
         )
         return 1
@@ -703,7 +787,7 @@ def stop_detached_stack(meta_path: Path, poll_interval: float = 0.1) -> int:
     stop_path.unlink(missing_ok=True)
     print(
         colored(
-            f"Detached stack '{meta.stack}' stopped.",
+            f"Stack '{meta.stack}' stopped.",
             color="green",
             attrs=["bold"],
         ),
@@ -728,16 +812,14 @@ def cleanup_stack_tasks(tasks: Sequence[DmonStackTask]) -> int:
     return cleanup(started)
 
 
-def status_detached_stack(meta_path: Path) -> int:
+def status_stack(meta_path: Path) -> int:
     try:
         meta = DmonStackMeta.load(meta_path.resolve())
     except (OSError, ValueError, TypeError) as error:
-        print(f"Detached stack metadata cannot be read: {error}", file=sys.stderr)
+        print(f"Stack metadata cannot be read: {error}", file=sys.stderr)
         return 1
     if meta is None:
-        print(
-            f"Detached stack metadata not found: {meta_path.resolve()}", file=sys.stderr
-        )
+        print(f"Stack metadata not found: {meta_path.resolve()}", file=sys.stderr)
         return 1
     print_stack_status(meta, show_tasks=True)
     supervisor_running = stack_process(meta) is not None
@@ -780,6 +862,7 @@ def print_stack_status(meta: DmonStackMeta, *, show_tasks: bool = False) -> None
         "STATUS     : " + colored(status, color=status_color, attrs=["bold"]),
         file=sys.stderr,
     )
+    print(f"MODE       : {meta.mode}", file=sys.stderr)
     print(
         f"SUPERVISOR : {colored(str(meta.pid), 'cyan', attrs=['bold'])}",
         file=sys.stderr,
@@ -788,7 +871,8 @@ def print_stack_status(meta: DmonStackMeta, *, show_tasks: bool = False) -> None
     policy = "abort-on-exit" if meta.abort_on_exit else "keep-running"
     print(f"EXIT POLICY: {policy}", file=sys.stderr)
     print(f"CONFIG     : {meta.config_path}", file=sys.stderr)
-    print(f"LOG        : {meta.log_path}", file=sys.stderr)
+    if meta.mode == "detached":
+        print(f"LOG        : {meta.log_path}", file=sys.stderr)
     if meta.error:
         print(f"ERROR      : {meta.error}", file=sys.stderr)
     if show_tasks and meta.tasks:
@@ -821,7 +905,7 @@ def stack_task_metas(meta: DmonStackMeta) -> list[DmonMeta]:
     return metas
 
 
-def list_detached_stacks(meta_dir: Path) -> int:
+def list_stacks(meta_dir: Path) -> int:
     target = meta_dir.resolve()
     metas = []
     errors = 0
@@ -848,10 +932,11 @@ def list_detached_stacks(meta_dir: Path) -> int:
                 status,
                 str(meta.pid),
                 f"{running}/{len(meta.tasks)}",
+                meta.mode,
                 "abort-on-exit" if meta.abort_on_exit else "keep-running",
             )
         )
-    headers = ("STACK", "STATUS", "SUPERVISOR", "TASKS", "EXIT POLICY")
+    headers = ("STACK", "STATUS", "SUPERVISOR", "TASKS", "MODE", "EXIT POLICY")
     widths = [
         max([len(headers[index]), *(len(row[index]) for row in rows)])
         for index in range(len(headers))
@@ -860,14 +945,15 @@ def list_detached_stacks(meta_dir: Path) -> int:
         "  ".join(f"{value:<{widths[index]}}" for index, value in enumerate(headers)),
         file=sys.stderr,
     )
-    for stack, status, supervisor, tasks, policy in rows:
+    for stack, status, supervisor, tasks, mode, policy in rows:
         status_color = stack_status_color(status)
         values = (
             colored(f"{stack:<{widths[0]}}", "cyan", attrs=["bold"]),
             colored(f"{status:<{widths[1]}}", status_color, attrs=["bold"]),
             f"{supervisor:<{widths[2]}}",
             f"{tasks:<{widths[3]}}",
-            f"{policy:<{widths[4]}}",
+            f"{mode:<{widths[4]}}",
+            f"{policy:<{widths[5]}}",
         )
         print("  ".join(values), file=sys.stderr)
     print(

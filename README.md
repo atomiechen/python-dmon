@@ -113,6 +113,10 @@ dmon status app
 dmon exec app
 ```
 
+`dmon exec` runs one configured command directly in the current terminal for
+debugging; it is not registered as a managed background task. Use `dmon start`
+when the task should remain discoverable through `dmon status` and `dmon list`.
+
 You can specify multiple tasks at once, e.g.: `dmon start app1 app2 app3`, except for `dmon exec` which only accepts one task.
 
 Multi-task `start` is best-effort: dmon attempts every requested task and leaves
@@ -121,7 +125,8 @@ non-zero status and prints a summary naming the failed tasks. This is useful for
 independent background services and does not provide atomic stack semantics.
 
 For related services that should start and stop as one unit, define a stack and
-run it in the foreground:
+run it in the foreground. Unlike a direct `dmon exec`, a foreground stack is a
+managed multi-task lifecycle and remains discoverable from another terminal:
 
 ```yaml
 tasks:
@@ -168,7 +173,8 @@ started by that invocation. After startup, an exited task marks the stack as
 degraded while unrelated tasks continue running, matching Docker Compose's
 default behavior. Use `--abort-on-exit` when the whole stack should stop after
 any runtime exit. Ctrl-C or SIGTERM cleans up a foreground stack in reverse
-order. Use `dmon stack down` to clean up a detached stack.
+order. `dmon stack down` requests the same cleanup for an active foreground or
+detached stack from another terminal.
 
 Foreground `dmon stack up` displays new task output with task-name prefixes,
 while retaining it in each task's configured `log_path`. Detached mode does not
@@ -183,9 +189,9 @@ requests the same graceful reverse-order cleanup on every platform. If that
 supervisor is killed, its persisted ownership metadata lets `down` recover and
 clean the tasks it started. Supervisor diagnostics are written to
 `logs/<stack>.stack.log`. `dmon stack status` includes every owned task and its
-process tree; `dmon stack list` summarizes all recorded stacks. `dmon stack
-restart` performs a clean `down` followed by a detached `up` and preserves the
-stack's exit policy.
+process tree; `dmon stack list` summarizes all recorded foreground and detached
+stacks. `dmon stack restart` applies to detached stacks: it performs a clean
+`down` followed by a detached `up` and preserves the stack's exit policy.
 
 Or use `--all` to operate on all tasks:
 
@@ -326,14 +332,15 @@ All paths can be absolute or relative to the **config file location**.
 ## Under the Hood
 
 Each task has `.dmon/<task>.meta.json`, which records its command, PID, process
-creation time, and log paths. A detached stack also has
-`.dmon/<stack>.stack.json`, which records its supervisor and the exact task
-processes it owns. Metadata paths are reserved exclusively and subsequent
+creation time, and log paths. An active foreground or detached stack also has
+`.dmon/<stack>.stack.json`, which records its mode, supervisor, and the exact
+task processes it owns. Metadata paths are reserved exclusively and subsequent
 updates replace the JSON atomically; a per-run ID isolates stop requests, while
 PID plus creation time prevents a recycled PID from being mistaken for the
-original process.
+original process. Normal foreground cleanup removes its stack metadata.
 
-`dmon stack down` normally asks the supervisor to stop tasks in reverse order.
+`dmon stack down` normally asks the foreground or detached supervisor to stop
+tasks in reverse order.
 If the supervisor has crashed, it uses the persisted process identities to
 recover the orphaned stack without inferring ownership from current
 configuration. Existing or unreadable stack metadata is preserved rather than

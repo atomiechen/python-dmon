@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Add detached stack supervision with `dmon stack up -d`, detailed status and listing, and `dmon stack down`.
 - Add detached stack restart with `dmon stack restart`.
 - Add read-only stack log snapshots and following with `dmon stack logs` and `dmon stack logs -f`.
+- Make foreground stacks discoverable through `dmon stack status` and `dmon stack list`, and safely stoppable from another terminal with `dmon stack down`.
 
 
 ## [0.3.1] - 2026-08-07

@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import redirect_stderr, redirect_stdout
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import StringIO
+import os
 from pathlib import Path
 import socket
 import sys
@@ -13,8 +14,16 @@ import unittest
 from unittest.mock import patch
 
 from dmon.control import check_running, start_single, stop_single
-from dmon.supervisor import cleanup, monitor, readiness_probe, task_message, up
-from dmon.types import DmonMeta, DmonTaskConfig
+from dmon.supervisor import (
+    cleanup,
+    monitor,
+    readiness_probe,
+    start_foreground_stack,
+    stop_stack,
+    task_message,
+    up,
+)
+from dmon.types import DmonMeta, DmonStackMeta, DmonTaskConfig
 
 
 class SupervisorTest(unittest.TestCase):
@@ -34,6 +43,46 @@ class SupervisorTest(unittest.TestCase):
             "<red>Task </red><cyan>'never-ready'</cyan>"
             "<red> did not become ready within 0.5 seconds.</red>",
         )
+
+    def test_stack_pid_reuse_does_not_stop_the_unrelated_process(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            meta_path = Path(temporary) / "dev.stack.json"
+            DmonStackMeta(
+                stack="dev",
+                mode="foreground",
+                state="running",
+                pid=os.getpid(),
+                create_time=0.0,
+            ).dump(meta_path)
+            with patch(
+                "dmon.supervisor.terminate_process"
+            ) as terminate, redirect_stderr(StringIO()):
+                self.assertEqual(stop_stack(meta_path), 0)
+            terminate.assert_not_called()
+            self.assertFalse(meta_path.exists())
+
+    def test_unexpected_foreground_supervisor_error_preserves_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            meta_path = root / ".dmon" / "dev.stack.json"
+            with patch("dmon.supervisor.up", side_effect=RuntimeError("simulated")):
+                with redirect_stderr(StringIO()), self.assertRaisesRegex(
+                    RuntimeError, "simulated"
+                ):
+                    start_foreground_stack(
+                        "dev",
+                        [],
+                        root / "dmon.yaml",
+                        meta_path,
+                        root / "logs" / "dev.stack.log",
+                    )
+            meta = DmonStackMeta.load(meta_path)
+            self.assertIsNotNone(meta)
+            assert meta is not None
+            self.assertEqual(meta.mode, "foreground")
+            self.assertEqual(meta.state, "failed")
+            self.assertEqual(meta.error, "simulated")
+            meta_path.unlink()
 
     def make_config(self, root: Path, task: str, command: list[str]) -> DmonTaskConfig:
         return DmonTaskConfig(

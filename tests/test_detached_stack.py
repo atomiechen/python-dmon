@@ -33,6 +33,19 @@ class DetachedStackTest(unittest.TestCase):
             diagnostics += log_path.read_text(encoding="utf-8", errors="replace")
         self.assertEqual(result.returncode, 0, diagnostics)
 
+    def wait_for_stack_state(self, meta_path: Path, state: str) -> dict:
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            try:
+                data = json.loads(meta_path.read_text(encoding="utf-8"))
+            except (FileNotFoundError, json.JSONDecodeError):
+                time.sleep(0.05)
+                continue
+            if data.get("state") == state:
+                return data
+            time.sleep(0.05)
+        self.fail(f"stack did not reach {state!r}: {meta_path}")
+
     def test_stack_list_handles_empty_and_corrupt_state(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -44,9 +57,20 @@ class DetachedStackTest(unittest.TestCase):
             meta_dir.mkdir()
             corrupt = meta_dir / "broken.stack.json"
             corrupt.write_text("{broken", encoding="utf-8")
+            config = {
+                "tasks": {"service": [sys.executable, "-c", "pass"]},
+                "stacks": {"broken": ["service"]},
+            }
+            (root / "dmon.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
             listed = self.run_dmon(root, "stack", "list")
             self.assertNotEqual(listed.returncode, 0)
             self.assertIn("Cannot read stack metadata", listed.stderr)
+            status = self.run_dmon(root, "stack", "status", "broken")
+            self.assertNotEqual(status.returncode, 0)
+            self.assertIn("metadata cannot be read", status.stderr)
+            started = self.run_dmon(root, "stack", "up", "broken")
+            self.assertNotEqual(started.returncode, 0)
+            self.assertIn("metadata cannot be read", started.stderr)
             self.assertTrue(corrupt.exists())
 
     def test_foreground_stack_cli_attaches_output_and_cleans_up(self) -> None:
@@ -70,6 +94,218 @@ class DetachedStackTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("[service] service ready", result.stdout)
             self.assertFalse((root / ".dmon" / "service.meta.json").exists())
+
+    def test_foreground_stack_is_discoverable_and_stoppable_cross_terminal(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = {
+                "tasks": {
+                    "service": [sys.executable, "-c", "import time; time.sleep(60)"]
+                },
+                "stacks": {"dev": ["service"]},
+            }
+            (root / "dmon.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+            meta_path = root / ".dmon" / "dev.stack.json"
+            foreground = subprocess.Popen(
+                [sys.executable, "-m", "dmon", "stack", "up", "dev"],
+                cwd=root,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            try:
+                meta = self.wait_for_stack_state(meta_path, "running")
+                self.assertEqual(meta["mode"], "foreground")
+
+                status = self.run_dmon(root, "stack", "status", "dev")
+                self.assertEqual(status.returncode, 0, status.stderr)
+                self.assertIn("MODE       : foreground", status.stderr)
+                self.assertNotIn("LOG        :", status.stderr)
+                self.assertRegex(status.stderr, r"service\s+\d+\s+\d+\s+Running")
+
+                listed = self.run_dmon(root, "stack", "list")
+                self.assertEqual(listed.returncode, 0, listed.stderr)
+                self.assertRegex(
+                    listed.stderr, r"dev\s+Running\s+\d+\s+1/1\s+foreground"
+                )
+
+                duplicate = self.run_dmon(root, "stack", "up", "-d", "dev")
+                self.assertNotEqual(duplicate.returncode, 0)
+                self.assertIn("already active", duplicate.stderr)
+
+                restarted = self.run_dmon(root, "stack", "restart", "dev")
+                self.assertNotEqual(restarted.returncode, 0)
+                self.assertIn(
+                    "cannot be restarted from another terminal", restarted.stderr
+                )
+
+                stopped = self.run_dmon(root, "stack", "down", "dev")
+                self.assertEqual(stopped.returncode, 0, stopped.stderr)
+                stdout, stderr = foreground.communicate(timeout=15)
+                self.assertEqual(foreground.returncode, 0, stdout + stderr)
+                self.assertFalse(meta_path.exists())
+                self.assertFalse((root / ".dmon" / "service.meta.json").exists())
+            finally:
+                if foreground.poll() is None:
+                    foreground.kill()
+                    foreground.wait(timeout=5)
+                if meta_path.exists():
+                    self.run_dmon(root, "stack", "down", "dev")
+
+    def test_concurrent_foreground_and_detached_start_have_one_owner(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = {
+                "tasks": {
+                    "service": [sys.executable, "-c", "import time; time.sleep(60)"]
+                },
+                "stacks": {"dev": ["service"]},
+            }
+            (root / "dmon.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+            meta_path = root / ".dmon" / "dev.stack.json"
+            processes = [
+                subprocess.Popen(
+                    [sys.executable, "-m", "dmon", "stack", "up", *options, "dev"],
+                    cwd=root,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                for options in ([], ["-d"])
+            ]
+            try:
+                meta = self.wait_for_stack_state(meta_path, "running")
+                self.assertIn(meta["mode"], {"foreground", "detached"})
+                stopped = self.run_dmon(root, "stack", "down", "dev")
+                self.assertEqual(stopped.returncode, 0, stopped.stderr)
+                results = [process.communicate(timeout=15) for process in processes]
+                self.assertEqual(
+                    sorted(process.returncode for process in processes), [0, 1], results
+                )
+                self.assertFalse(meta_path.exists())
+                self.assertFalse((root / ".dmon" / "service.meta.json").exists())
+            finally:
+                for process in processes:
+                    if process.poll() is None:
+                        process.kill()
+                        process.wait(timeout=5)
+                    process.communicate()
+                if meta_path.exists():
+                    self.run_dmon(root, "stack", "down", "dev")
+
+    @unittest.skipIf(sys.platform.startswith("win"), "SIGTERM is POSIX-specific")
+    def test_foreground_sigterm_cleans_owned_tasks_and_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = {
+                "tasks": {
+                    "service": [sys.executable, "-c", "import time; time.sleep(60)"]
+                },
+                "stacks": {"dev": ["service"]},
+            }
+            (root / "dmon.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+            meta_path = root / ".dmon" / "dev.stack.json"
+            foreground = subprocess.Popen(
+                [sys.executable, "-m", "dmon", "stack", "up", "dev"],
+                cwd=root,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            try:
+                self.wait_for_stack_state(meta_path, "running")
+                foreground.terminate()
+                stdout, stderr = foreground.communicate(timeout=15)
+                self.assertEqual(foreground.returncode, 0, stdout + stderr)
+                self.assertFalse(meta_path.exists())
+                self.assertFalse((root / ".dmon" / "service.meta.json").exists())
+            finally:
+                if foreground.poll() is None:
+                    foreground.kill()
+                    foreground.wait(timeout=5)
+                if meta_path.exists():
+                    self.run_dmon(root, "stack", "down", "dev")
+
+    def test_down_recovers_after_foreground_supervisor_is_killed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = {
+                "tasks": {
+                    "service": [sys.executable, "-c", "import time; time.sleep(60)"]
+                },
+                "stacks": {"dev": ["service"]},
+            }
+            (root / "dmon.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+            meta_path = root / ".dmon" / "dev.stack.json"
+            foreground = subprocess.Popen(
+                [sys.executable, "-m", "dmon", "stack", "up", "dev"],
+                cwd=root,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            try:
+                self.wait_for_stack_state(meta_path, "running")
+                foreground.kill()
+                foreground.wait(timeout=5)
+                foreground.communicate()
+
+                status = self.run_dmon(root, "stack", "status", "dev")
+                self.assertNotEqual(status.returncode, 0)
+                self.assertIn("STATUS     : Orphaned", status.stderr)
+                self.assertIn("MODE       : foreground", status.stderr)
+
+                stopped = self.run_dmon(root, "stack", "down", "dev")
+                self.assertEqual(stopped.returncode, 0, stopped.stderr)
+                self.assertFalse(meta_path.exists())
+                self.assertFalse((root / ".dmon" / "service.meta.json").exists())
+            finally:
+                if foreground.poll() is None:
+                    foreground.kill()
+                    foreground.wait(timeout=5)
+                if meta_path.exists():
+                    self.run_dmon(root, "stack", "down", "dev")
+
+    def test_foreground_runtime_exit_is_reported_as_degraded(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = {
+                "tasks": {
+                    "service": [sys.executable, "-c", "import time; time.sleep(60)"],
+                    "short": [sys.executable, "-c", "import time; time.sleep(0.5)"],
+                },
+                "stacks": {"dev": ["service", "short"]},
+            }
+            (root / "dmon.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+            meta_path = root / ".dmon" / "dev.stack.json"
+            foreground = subprocess.Popen(
+                [sys.executable, "-m", "dmon", "stack", "up", "dev"],
+                cwd=root,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            try:
+                self.wait_for_stack_state(meta_path, "degraded")
+                status = self.run_dmon(root, "stack", "status", "dev")
+                self.assertNotEqual(status.returncode, 0)
+                self.assertIn("STATUS     : Degraded", status.stderr)
+                self.assertIn("MODE       : foreground", status.stderr)
+                self.assertIn("TASKS      : 1/2 running", status.stderr)
+
+                stopped = self.run_dmon(root, "stack", "down", "dev")
+                self.assertEqual(stopped.returncode, 0, stopped.stderr)
+                foreground.communicate(timeout=15)
+                self.assertEqual(foreground.returncode, 0)
+            finally:
+                if foreground.poll() is None:
+                    foreground.kill()
+                    foreground.wait(timeout=5)
+                foreground.communicate()
+                if meta_path.exists():
+                    self.run_dmon(root, "stack", "down", "dev")
 
     def test_detached_stack_lifecycle_and_duplicate_start(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

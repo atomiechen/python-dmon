@@ -25,7 +25,8 @@ validation and CI to detect an out-of-date lockfile.
 - `logs.py` reads and follows task logs without importing process control.
 - `runner.py` captures task output and rotates logs.
 - `supervisor.py` coordinates dependent tasks, readiness, monitoring, and
-  reverse-order cleanup, including persisted detached-stack ownership.
+  reverse-order cleanup, including persisted foreground and detached stack
+  ownership.
 - `stack_runner.py` is the minimal background entry point for a detached stack;
   lifecycle behavior remains in `supervisor.py`.
 - `types.py` contains persisted and runtime data structures.
@@ -55,13 +56,18 @@ output so machine-readable output can be added without breaking terminal use.
   default. The explicit abort-on-exit policy is fail-fast. An interrupt,
   startup failure, readiness timeout, requested stop, or unexpected supervisor
   error must still run cleanup.
-- A detached stack persists the supervisor identity and immutable task process
+- An active stack persists its foreground or detached mode, supervisor identity,
+  and immutable task process
   identities it owns. `down` uses a per-run, cross-platform stop request, then
   falls back to those identities if the supervisor has crashed; it must never
   infer ownership from task names or the current configuration.
-- Reserve detached stack metadata atomically. Concurrent `dmon stack up -d`
-  calls must have exactly one owner, and failed or corrupt metadata remains
-  diagnosable.
+- Reserve stack metadata atomically. Concurrent foreground or detached starts
+  must have exactly one owner, and failed or corrupt metadata remains
+  diagnosable. Normal foreground cleanup removes its ownership metadata;
+  unexpected supervisor failure preserves recoverable state.
+- A foreground stack may be inspected or stopped from another terminal.
+  Cross-terminal restart is rejected rather than silently changing it into a
+  detached stack.
 
 ### CLI behavior
 

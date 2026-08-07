@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -29,6 +30,15 @@ class DmonMetaTest(unittest.TestCase):
             path.write_text("[]", encoding="utf-8")
             with self.assertRaisesRegex(TypeError, "JSON object"):
                 DmonStackMeta.load(path)
+
+    def test_stack_metadata_without_mode_remains_detached_compatible(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "legacy.stack.json"
+            path.write_text(json.dumps({"stack": "legacy"}), encoding="utf-8")
+            loaded = DmonStackMeta.load(path)
+            self.assertIsNotNone(loaded)
+            assert loaded is not None
+            self.assertEqual(loaded.mode, "detached")
 
     def test_exclusive_dump_reserves_metadata_path(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

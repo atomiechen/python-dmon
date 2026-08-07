@@ -35,11 +35,11 @@ from .constants import (
 )
 from .logs import show_stack_logs
 from .supervisor import (
-    list_detached_stacks,
+    list_stacks,
     start_detached_stack,
-    status_detached_stack,
-    stop_detached_stack,
-    up,
+    start_foreground_stack,
+    status_stack,
+    stop_stack,
 )
 from .types import DmonStackMeta, DmonTaskConfig
 
@@ -259,8 +259,8 @@ def main():
 
     sp_stack_down = stack_subparsers.add_parser(
         "down",
-        help="Stop a detached stack",
-        description="Stop a detached stack and all tasks owned by it",
+        help="Stop an active stack",
+        description="Stop a foreground or detached stack and all tasks owned by it",
     )
     sp_stack_down.add_argument(
         "stack",
@@ -282,7 +282,7 @@ def main():
     sp_stack_status = stack_subparsers.add_parser(
         "status",
         help="Show stack and member task status",
-        description="Show a detached stack and every task process it owns",
+        description="Show an active stack and every task process it owns",
     )
     sp_stack_status.add_argument(
         "stack",
@@ -317,7 +317,7 @@ def main():
     sp_stack_list = stack_subparsers.add_parser(
         "list",
         help="List all recorded stacks",
-        description="List all detached stack metadata in the project",
+        description="List all recorded stack metadata in the project",
     )
 
     # add custom config file option
@@ -375,7 +375,14 @@ def main():
                         abort_on_exit=args.abort_on_exit,
                     )
                 else:
-                    exit_code = up(task_cfgs, abort_on_exit=args.abort_on_exit)
+                    exit_code = start_foreground_stack(
+                        stack,
+                        task_cfgs,
+                        cfg_path,
+                        Path(STACK_META_PATH_TEMPLATE.format(stack=stack)),
+                        Path(STACK_LOG_PATH_TEMPLATE.format(stack=stack)),
+                        abort_on_exit=args.abort_on_exit,
+                    )
             except Exception as error:
                 print(f"Stack supervision failed: {error}", file=sys.stderr)
                 exit_code = 1
@@ -394,7 +401,7 @@ def main():
                 os.chdir(directory)
             except Exception as error:
                 sp.error(str(error))
-            sp.exit(list_detached_stacks(DEFAULT_META_DIR))
+            sp.exit(list_stacks(DEFAULT_META_DIR))
 
         if args.stack_command == "restart":
             try:
@@ -406,8 +413,13 @@ def main():
             except Exception as error:
                 sp.error(str(error))
             if current is None:
-                sp.error(f"Detached stack '{stack}' is not running")
-            if stop_detached_stack(meta_path):
+                sp.error(f"Stack '{stack}' is not running")
+            if current.mode == "foreground":
+                sp.error(
+                    f"Foreground stack '{stack}' cannot be restarted from another "
+                    "terminal; stop it with 'dmon stack down' and start it again."
+                )
+            if stop_stack(meta_path):
                 sp.exit(1)
             sp.exit(
                 start_detached_stack(
@@ -427,9 +439,9 @@ def main():
         except Exception as error:
             sp.error(str(error))
         if args.stack_command == "down":
-            sp.exit(stop_detached_stack(meta_path))
+            sp.exit(stop_stack(meta_path))
         if args.stack_command == "status":
-            sp.exit(status_detached_stack(meta_path))
+            sp.exit(status_stack(meta_path))
     elif args.command in ["start", "restart"]:
         sp = sp_start if args.command == "start" else sp_restart
         try:

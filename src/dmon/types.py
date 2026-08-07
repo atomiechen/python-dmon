@@ -128,6 +128,7 @@ class DmonStackTask:
 class DmonStackMeta:
     stack: str
     run_id: str = ""
+    mode: str = "detached"
     abort_on_exit: bool = False
     state: str = "starting"
     pid: int = -1
