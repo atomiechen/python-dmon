@@ -162,7 +162,9 @@ def start_single(cfg: DmonTaskConfig):
 
             meta.rotate_log_path = str(rotate_log_path)
             meta.log_max_size = cfg.log_max_size
+            meta.log_backup_count = cfg.log_backup_count
             meta.rotate_log_max_size = cfg.rotate_log_max_size
+            meta.rotate_log_backup_count = cfg.rotate_log_backup_count
 
             ensure_log_dir(rotate_log_path)
 
@@ -185,6 +187,12 @@ def start_single(cfg: DmonTaskConfig):
                 "--max-rotate-log-size",
                 str(cfg.rotate_log_max_size),
             ]
+            if cfg.log_backup_count is not None:
+                args.extend(["--log-backup-count", str(cfg.log_backup_count)])
+            if cfg.rotate_log_backup_count is not None:
+                args.extend(
+                    ["--rotate-log-backup-count", str(cfg.rotate_log_backup_count)]
+                )
             if shell:
                 args.append("--shell")
             args.append("--")
@@ -583,7 +591,11 @@ def print_status(meta: DmonMeta):
     if meta.log_rotate:
         rows.append(("ROTATE LOG PATH", meta.rotate_log_path))
         rows.append(("LOG MAX SIZE", f"{meta.log_max_size} MB"))
+        if meta.log_backup_count is not None:
+            rows.append(("LOG BACKUP COUNT", meta.log_backup_count))
         rows.append(("ROTATE LOG MAX SIZE", f"{meta.rotate_log_max_size} MB"))
+        if meta.rotate_log_backup_count is not None:
+            rows.append(("ROTATE LOG BACKUP COUNT", meta.rotate_log_backup_count))
 
     # calculate the max width of the keys
     key_width = max(len(key) for key, _ in rows)
@@ -725,11 +737,7 @@ def execute(cfg: DmonTaskConfig):
     """
     cwd = Path(cfg.cwd).resolve()
 
-    env = None  # default behavior of Popen
-    if cfg.override_env:
-        env = cfg.env
-    elif cfg.env:
-        env = {**os.environ, **cfg.env}
+    env = task_environment(cfg)
 
     shell = isinstance(cfg.cmd, str)
     if ON_WINDOWS and isinstance(cfg.cmd, list) and len(cfg.cmd) > 0:

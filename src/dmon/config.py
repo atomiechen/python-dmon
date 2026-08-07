@@ -134,6 +134,14 @@ def validate_task(task, name: str) -> DmonTaskConfig:
                 )
             ret.log_max_size = task["log_max_size"]
 
+        if "log_backup_count" in task:
+            value = task["log_backup_count"]
+            if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+                raise TypeError(
+                    f"Task '{name}' 'log_backup_count' field must be a positive integer"
+                )
+            ret.log_backup_count = value
+
         if "rotate_log_path" in task:
             if not isinstance(task["rotate_log_path"], str):
                 raise TypeError(
@@ -150,6 +158,14 @@ def validate_task(task, name: str) -> DmonTaskConfig:
                     f"Task '{name}' 'rotate_log_max_size' field must be a positive number"
                 )
             ret.rotate_log_max_size = task["rotate_log_max_size"]
+
+        if "rotate_log_backup_count" in task:
+            value = task["rotate_log_backup_count"]
+            if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+                raise TypeError(
+                    f"Task '{name}' 'rotate_log_backup_count' field must be a positive integer"
+                )
+            ret.rotate_log_backup_count = value
 
         if "meta_path" in task:
             if not isinstance(task["meta_path"], str):

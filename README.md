@@ -19,7 +19,7 @@ It is a Python-based and more powerful successor to the [handy-backend shell scr
 - 🖥️ **Cross-platform:** Works on Linux, macOS, and Windows.
 - ⚡ **Lightweight:** Pure Python, no Docker or external dependencies needed.
 - 🧩 **Flexible tasks:** Tasks can be configured in `pyproject.toml` or `dmon.yaml`; or run ad-hoc commands directly.
-- 🪵 **Logging & log rotation:** Automatically manage log files to prevent uncontrolled growth.
+- 🪵 **Logging & log rotation:** Keep active log files manageable, with optional archive retention limits.
 
 ![dmon-demo-gif](https://github.com/user-attachments/assets/9bae2f46-5ef4-4784-aced-18d573204efc)
 
@@ -159,7 +159,7 @@ tasks:
 # Run a command with arguments in the background
 dmon run --name myserver python -u server.py
 
-# Use -- before options that belong to the child command
+# Optionally use -- to make the child-command boundary explicit
 dmon run --name timer -- python -c 'import time; time.sleep(30)'
 
 # Run a shell command in the background
@@ -184,6 +184,16 @@ dmon list
 
 A task can be a **string**, **list**, or **dictionary**.
 
+When rotation is enabled, dmon keeps timestamped archives such as
+`app.log.20260807-142106`. Both task and runner logs use this cross-platform
+format; a same-second collision adds `.1`, `.2`, and so on. Archives are never
+deleted by default. Set a backup count explicitly to enable retention cleanup.
+`log_path` contains task output; `rotate_log_path` contains diagnostics from the
+dmon process that captures and rotates that output. They are independent log
+streams and use independent retention settings.
+The size limit is checked at line boundaries, so a single long line may exceed
+the configured limit.
+
 Here is a more complete example with default values:
 
 ```yaml
@@ -198,8 +208,10 @@ tasks:
     log_path: "logs/<task>.log" # path to log file
     log_rotate: false  # enable log rotation
     log_max_size: 5  # max log file size before rotation in MB
+    # log_backup_count: 10  # optional; omit to retain all task log archives
     rotate_log_path: "logs/<task>.rotate.log"  # path to rotation log
     rotate_log_max_size: 5  # max rotation log file size in MB
+    # rotate_log_backup_count: 10  # optional; omit to retain all runner log archives
     meta_path: ".dmon/<task>.meta.json"  # path to meta file
 default_task: your_task_name  # the default task name
 ```

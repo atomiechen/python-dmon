@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - All paths in the config file are relative to the config file location, and the command will be executed in the config file directory as well. This allows more flexible usage such as running `dmon` from anywhere with `--config` pointing to another directory, or running from a subdirectory, which will search for config file in parent directories.
 - Add `-c` alias of `--config` option for shorter command line usage.
 - Add automated tests on Linux, macOS, and Windows, including Python 3.8 compatibility.
+- Add opt-in backup counts for task and runner logs; archives remain unlimited when omitted.
 
 ### Fixed
 
@@ -22,8 +23,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Treat zombie and exited processes as stopped, return a failing status for exited tasks, and clean stale metadata safely.
 - Resolve explicit `stop` and `status` task metadata relative to the selected config file.
 - Allow ad-hoc `dmon run` outside a directory containing a dmon config file.
+- Accept child-command options in `dmon run` with or without a `--` separator.
 - Deliver Ctrl-C only once to foreground tasks run with `dmon exec`.
-- Keep log rotation bounded to the active file and one backup instead of accumulating timestamped files indefinitely.
+- Use one consistent, cross-platform timestamp format for task and runner log archives.
 
 
 ## [0.3.0] - 2026-01-09

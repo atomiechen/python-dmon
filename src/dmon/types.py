@@ -35,10 +35,14 @@ class DmonTaskConfig:
     """Whether to rotate log file"""
     log_max_size: float = 5
     """Size in MB to rotate log file"""
+    log_backup_count: Optional[int] = None
+    """Number of task log archives to retain; None keeps all archives"""
     rotate_log_path: str = ""
     """Path to rotation log file"""
     rotate_log_max_size: float = 5
     """Size in MB to rotation log file"""
+    rotate_log_backup_count: Optional[int] = None
+    """Number of runner log archives to retain; None keeps all archives"""
     meta_path: str = ""
     """Path to meta file"""
 

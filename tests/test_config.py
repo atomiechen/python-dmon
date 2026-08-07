@@ -5,7 +5,12 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from dmon.config import check_name_in_config, get_task_config, load_config
+from dmon.config import (
+    check_name_in_config,
+    get_task_config,
+    load_config,
+    validate_task,
+)
 
 
 class ConfigTest(unittest.TestCase):
@@ -30,6 +35,18 @@ class ConfigTest(unittest.TestCase):
             "dmon.config.Path.cwd", return_value=Path(temporary)
         ):
             self.assertFalse(check_name_in_config("adhoc"))
+
+    def test_log_backup_counts_must_be_positive_integers(self) -> None:
+        for field in ("log_backup_count", "rotate_log_backup_count"):
+            for value in (0, -1, 1.5, True, "2"):
+                with self.subTest(field=field, value=value), self.assertRaisesRegex(
+                    TypeError, "positive integer"
+                ):
+                    validate_task({"cmd": ["app"], field: value}, "app")
+
+            with self.subTest(field=field):
+                config = validate_task({"cmd": ["app"], field: 2}, "app")
+                self.assertEqual(getattr(config, field), 2)
 
 
 if __name__ == "__main__":

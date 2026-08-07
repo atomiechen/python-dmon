@@ -194,8 +194,8 @@ def main():
     sp_run.add_argument(
         "command_list",
         metavar="COMMAND",
-        nargs=argparse.ONE_OR_MORE,
-        help="Command and arguments to run; use '--' before command options",
+        nargs=argparse.REMAINDER,
+        help="Command and arguments to run; '--' is an optional separator",
     )
 
     sp_exec = subparsers.add_parser(
@@ -310,6 +310,11 @@ def main():
         dir = args.dir or DEFAULT_META_DIR
         sp_list.exit(list_processes(dir, args.full))
     elif args.command == "run":
+        command_list = args.command_list
+        if command_list and command_list[0] == "--":
+            command_list = command_list[1:]
+        if not command_list:
+            sp_run.error("Please provide a command to run.")
         if not args.name:
             sp_run.error("Please provide a non-empty name for the task.")
         elif check_name_in_config(args.name):
@@ -319,7 +324,7 @@ def main():
 
         task_cfg = DmonTaskConfig(
             task=args.name,
-            cmd=shlex.join(args.command_list) if args.shell else args.command_list,
+            cmd=shlex.join(command_list) if args.shell else command_list,
             cwd=args.cwd,
             meta_path=args.meta_file or META_PATH_TEMPLATE.format(task=args.name),
             log_path=args.log_file or LOG_PATH_TEMPLATE.format(task=args.name),
