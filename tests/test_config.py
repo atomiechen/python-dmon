@@ -113,6 +113,22 @@ stacks:
             with self.assertRaisesRegex(ValueError, "database.*not defined"):
                 get_stack_config("broken", str(path))
 
+    def test_stack_does_not_validate_unrelated_tasks(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = self.write_config(
+                Path(temporary),
+                """
+tasks:
+  app: [python, app.py]
+  unrelated:
+    invalid: true
+stacks:
+  dev: [app]
+""",
+            )
+            _, configs, _ = get_stack_config("dev", str(path))
+            self.assertEqual([config.task for config in configs], ["app"])
+
     def test_ready_probe_requires_exactly_one_supported_probe(self) -> None:
         for ready in ({}, {"http": "http://localhost", "command": ["true"]}):
             with self.subTest(ready=ready), self.assertRaisesRegex(

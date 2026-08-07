@@ -23,6 +23,12 @@ class StartResult:
     meta: Optional[DmonMeta] = None
 
 
+def background_process_kwargs() -> dict:
+    if ON_WINDOWS:
+        return {"creationflags": 0x08000000}  # CREATE_NO_WINDOW
+    return {"start_new_session": True}
+
+
 def ensure_meta_dir(meta_path: Path):
     """
     Ensure the meta directory exists.
@@ -127,18 +133,12 @@ def start_single_result(cfg: DmonTaskConfig) -> StartResult:
     shell = isinstance(cfg.cmd, str)
 
     # Platform-specific parameters to run the process in background detached from parent
-    kwargs = {}
+    kwargs = background_process_kwargs()
     command = cfg.cmd
     if ON_WINDOWS:
-        # DETACHED_PROCESS = 0x00000008
-        CREATE_NO_WINDOW = 0x08000000
-        kwargs["creationflags"] = CREATE_NO_WINDOW
         if isinstance(command, list) and len(command) > 0:
             # On Windows, use full path for the executable when shell=False
             command = [shutil.which(command[0]) or command[0], *command[1:]]
-    else:
-        # Make the child process independent of the parent process in Unix-like systems
-        kwargs["start_new_session"] = True
 
     meta = DmonMeta(
         task=cfg.task,

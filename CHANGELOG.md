@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Add `dmon up` for supervised, fail-fast stacks with dependency ordering, readiness probes, runtime monitoring, and automatic cleanup.
 - Add HTTP, TCP, and command readiness probes.
+- Add detached stack supervision with `dmon up -d`, `dmon status --stack`, and `dmon down`.
 
 
 ## [0.3.1] - 2026-08-07

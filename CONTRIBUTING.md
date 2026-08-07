@@ -24,7 +24,9 @@ validation and CI to detect an out-of-date lockfile.
 - `control.py` owns individual task lifecycle and process metadata.
 - `runner.py` captures task output and rotates logs.
 - `supervisor.py` coordinates dependent tasks, readiness, monitoring, and
-  reverse-order cleanup.
+  reverse-order cleanup, including persisted detached-stack ownership.
+- `stack_runner.py` is the minimal background entry point for a detached stack;
+  lifecycle behavior remains in `supervisor.py`.
 - `types.py` contains persisted and runtime data structures.
 
 Keep process and readiness behavior in these core layers. A future CLI format or
@@ -50,6 +52,12 @@ output so machine-readable output can be added without breaking terminal use.
   up only tasks started by that invocation, in reverse dependency order.
 - An interrupt, startup failure, readiness timeout, runtime exit, or unexpected
   supervisor error must still run cleanup.
+- A detached stack persists the supervisor identity and immutable task process
+  identities it owns. `down` uses a per-run, cross-platform stop request, then
+  falls back to those identities if the supervisor has crashed; it must never
+  infer ownership from task names or the current configuration.
+- Reserve detached stack metadata atomically. Concurrent `up -d` calls must have
+  exactly one owner, and failed or corrupt metadata remains diagnosable.
 
 ### CLI behavior
 
@@ -65,6 +73,8 @@ output so machine-readable output can be added without breaking terminal use.
   surrounding diagnostics. Color must add meaning without becoming the only way
   to distinguish a task name, state, warning, or error. Respect non-interactive
   output.
+- Render task and stack identifiers without quotes in structured tables. Quote
+  them in prose diagnostics so their boundaries remain unambiguous.
 
 ### Logging
 

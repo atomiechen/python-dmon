@@ -138,7 +138,7 @@ class SupervisorTest(unittest.TestCase):
             )
             captured = []
 
-            def remove_metadata(_config, meta):
+            def remove_metadata(_config, meta, **_kwargs):
                 captured.append(meta)
                 Path(running.meta_path).unlink()
                 return True
@@ -164,7 +164,7 @@ class SupervisorTest(unittest.TestCase):
             )
             captured = []
 
-            def fail_supervision(_config, meta):
+            def fail_supervision(_config, meta, **_kwargs):
                 captured.append(meta)
                 raise RuntimeError("simulated supervisor failure")
 

@@ -3,10 +3,18 @@ import os
 from pathlib import Path
 import shlex
 import sys
+from typing import Optional, Tuple
 
 from colorama import just_fix_windows_console
 
-from .config import check_name_in_config, get_stack_config, get_task_config, load_config
+from .config import (
+    check_name_in_config,
+    fill_default_paths,
+    get_stack_config,
+    get_task_config,
+    load_config,
+    resolve_stack,
+)
 from .control import (
     execute,
     get_meta_paths,
@@ -22,9 +30,16 @@ from .constants import (
     LOG_PATH_TEMPLATE,
     META_PATH_TEMPLATE,
     ROTATE_LOG_PATH_TEMPLATE,
+    STACK_LOG_PATH_TEMPLATE,
+    STACK_META_PATH_TEMPLATE,
 )
 from .types import DmonTaskConfig
-from .supervisor import up
+from .supervisor import (
+    start_detached_stack,
+    status_detached_stack,
+    stop_detached_stack,
+    up,
+)
 
 
 def get_version():
@@ -136,6 +151,13 @@ def main():
         action="store_true",
         help=f"Check status of all processes in meta dir ({DEFAULT_META_DIR})",
     )
+    sp_status.add_argument(
+        "--stack",
+        nargs="?",
+        const="",
+        metavar="NAME",
+        help="Check a detached stack (default: default_stack or the only stack)",
+    )
 
     # list subcommand
     sp_list = subparsers.add_parser(
@@ -221,9 +243,26 @@ def main():
         help="Configured stack name (default: default_stack or the only stack)",
         nargs="?",
     )
+    sp_up.add_argument(
+        "-d",
+        "--detach",
+        action="store_true",
+        help="Run the stack under a background supervisor",
+    )
+
+    sp_down = subparsers.add_parser(
+        "down",
+        help="Stop a detached stack",
+        description="Stop a detached stack and all tasks owned by it",
+    )
+    sp_down.add_argument(
+        "stack",
+        help="Configured stack name (default: default_stack or the only stack)",
+        nargs="?",
+    )
 
     # add custom config file option
-    for sp in [sp_start, sp_stop, sp_restart, sp_status, sp_exec, sp_up]:
+    for sp in [sp_start, sp_stop, sp_restart, sp_status, sp_exec, sp_up, sp_down]:
         sp.add_argument(
             "-c",
             "--config",
@@ -253,7 +292,7 @@ def main():
                 sp.error(
                     f"'--meta-file' and '--log-file' can only be specified when {args.command}ing a single task"
                 )
-        fill_default_paths(tasks, task_cfgs)
+        fill_default_paths(task_cfgs)
         if args.command == "start":
             sp.exit(start(task_cfgs))
         else:
@@ -267,19 +306,53 @@ def main():
         sp_exec.exit(execute(task_cfgs[0]))
     elif args.command == "up":
         try:
-            _, task_cfgs, cfg_path = get_stack_config(args.stack, args.config)
+            stack, task_cfgs, cfg_path = get_stack_config(args.stack, args.config)
             os.chdir(cfg_path.parent)
         except Exception as e:
             sp_up.error(str(e))
-        fill_default_paths([config.task for config in task_cfgs], task_cfgs)
+        fill_default_paths(task_cfgs)
         try:
-            exit_code = up(task_cfgs)
+            if args.detach:
+                exit_code = start_detached_stack(
+                    stack,
+                    task_cfgs,
+                    cfg_path,
+                    Path(STACK_META_PATH_TEMPLATE.format(stack=stack)),
+                    Path(STACK_LOG_PATH_TEMPLATE.format(stack=stack)),
+                )
+            else:
+                exit_code = up(task_cfgs)
         except Exception as e:
             print(f"Stack supervision failed: {e}", file=sys.stderr)
             exit_code = 1
         sp_up.exit(exit_code)
+    elif args.command == "down":
+        try:
+            stack, directory = resolve_stack_target(args.stack, args.config)
+            os.chdir(directory)
+        except Exception as e:
+            sp_down.error(str(e))
+        sp_down.exit(
+            stop_detached_stack(Path(STACK_META_PATH_TEMPLATE.format(stack=stack)))
+        )
     elif args.command in ["stop", "status"]:
         sp = sp_stop if args.command == "stop" else sp_status
+        if args.command == "status" and args.stack is not None:
+            if args.task or args.meta_file or args.all:
+                sp.error(
+                    "'--stack' cannot be combined with tasks, '--meta-file', or '--all'"
+                )
+            try:
+                requested = args.stack or None
+                stack, directory = resolve_stack_target(requested, args.config)
+                os.chdir(directory)
+            except Exception as e:
+                sp.error(str(e))
+            sp.exit(
+                status_detached_stack(
+                    Path(STACK_META_PATH_TEMPLATE.format(stack=stack))
+                )
+            )
         meta_paths = []
 
         tasks = args.task
@@ -356,13 +429,24 @@ def main():
         parser.exit(1)
 
 
-def fill_default_paths(tasks, task_cfgs) -> None:
-    for task, task_cfg in zip(tasks, task_cfgs):
-        task_cfg.meta_path = task_cfg.meta_path or META_PATH_TEMPLATE.format(task=task)
-        task_cfg.log_path = task_cfg.log_path or LOG_PATH_TEMPLATE.format(task=task)
-        task_cfg.rotate_log_path = (
-            task_cfg.rotate_log_path or ROTATE_LOG_PATH_TEMPLATE.format(task=task)
-        )
+def resolve_stack_target(
+    name: Optional[str], config_path: Optional[str]
+) -> Tuple[str, Path]:
+    if name is None:
+        stack, _, path = resolve_stack(None, config_path)
+        return stack, path.parent
+    if not name:
+        raise ValueError("Stack name must not be empty")
+    if config_path:
+        path = Path(config_path).resolve()
+        directory = path if path.is_dir() else path.parent
+    else:
+        try:
+            _, path = load_config()
+            directory = path.parent
+        except FileNotFoundError:
+            directory = Path.cwd()
+    return name.lower(), directory
 
 
 if __name__ == "__main__":

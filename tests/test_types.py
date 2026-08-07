@@ -4,10 +4,31 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from dmon.types import DmonMeta
+from dmon.types import DmonMeta, DmonStackMeta, DmonStackTask
 
 
 class DmonMetaTest(unittest.TestCase):
+    def test_stack_metadata_round_trip_preserves_owned_processes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "dev.stack.json"
+            expected = DmonStackMeta(
+                stack="dev",
+                run_id="run-123",
+                state="running",
+                pid=41,
+                create_time=42.0,
+                tasks=[DmonStackTask("api", 43, 44.0, ".dmon/api.meta.json")],
+            )
+            expected.dump(path, exclusive=True)
+            self.assertEqual(DmonStackMeta.load(path), expected)
+
+    def test_malformed_stack_metadata_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "dev.stack.json"
+            path.write_text("[]", encoding="utf-8")
+            with self.assertRaisesRegex(TypeError, "JSON object"):
+                DmonStackMeta.load(path)
+
     def test_exclusive_dump_reserves_metadata_path(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "task.meta.json"

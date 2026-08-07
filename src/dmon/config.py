@@ -10,6 +10,7 @@ else:
     import tomli as tomllib
 
 from .types import CmdType, DmonTaskConfig
+from .constants import LOG_PATH_TEMPLATE, META_PATH_TEMPLATE, ROTATE_LOG_PATH_TEMPLATE
 
 
 def search_config(start_dir: Path, recursive: bool) -> Optional[Path]:
@@ -308,6 +309,55 @@ def get_task_config(
 def get_stack_config(
     name: Optional[str], cfg_path: Optional[str] = None
 ) -> Tuple[str, List[DmonTaskConfig], Path]:
+    name, cfg, path = resolve_stack(name, cfg_path)
+    tasks = cfg.get("tasks", {})
+    stacks = cfg["stacks"]
+    selected = stacks[name]
+    assert isinstance(tasks, dict)
+    assert isinstance(selected, list)
+
+    normalized_tasks = {}
+    for task_name, task in tasks.items():
+        if not isinstance(task_name, str):
+            raise TypeError("Task names must be strings")
+        normalized = task_name.lower()
+        if normalized in normalized_tasks:
+            raise ValueError(f"Duplicate task name after normalization: '{normalized}'")
+        normalized_tasks[normalized] = task
+    validated = {}
+    order: List[str] = []
+    visiting: List[str] = []
+    visited = set()
+
+    def visit(task_name: str) -> None:
+        task_name = task_name.lower()
+        if task_name in visited:
+            return
+        if task_name in visiting:
+            cycle = " -> ".join([*visiting[visiting.index(task_name) :], task_name])
+            raise ValueError(f"Task dependency cycle in stack '{name}': {cycle}")
+        if task_name not in normalized_tasks:
+            raise ValueError(
+                f"Task '{task_name}' referenced by stack '{name}' is not defined"
+            )
+        if task_name not in validated:
+            validated[task_name] = validate_task(normalized_tasks[task_name], task_name)
+        visiting.append(task_name)
+        for dependency in validated[task_name].depends_on:
+            visit(dependency)
+        visiting.pop()
+        visited.add(task_name)
+        order.append(task_name)
+
+    for task_name in selected:
+        visit(task_name)
+    configs = [validated[task_name] for task_name in order]
+    return name, configs, path
+
+
+def resolve_stack(
+    name: Optional[str], cfg_path: Optional[str] = None
+) -> Tuple[str, Dict[str, object], Path]:
     cfg, path = load_config(cfg_path)
     tasks = cfg.get("tasks", {})
     stacks = cfg.get("stacks", {})
@@ -316,7 +366,7 @@ def get_stack_config(
     if not isinstance(stacks, dict):
         raise TypeError("'stacks' must be a table")
 
-    normalized_stacks = {}
+    normalized_stacks: Dict[str, object] = {}
     for stack_name, stack in stacks.items():
         if not isinstance(stack_name, str):
             raise TypeError("Stack names must be strings")
@@ -348,40 +398,20 @@ def get_stack_config(
         or not all(isinstance(item, str) and item for item in selected)
     ):
         raise TypeError(f"Stack '{name}' must be a non-empty list of task names")
+    cfg = dict(cfg)
+    cfg["stacks"] = normalized_stacks
+    return name, cast(Dict[str, object], cfg), path
 
-    validated = {}
-    for task_name, task in tasks.items():
-        if not isinstance(task_name, str):
-            raise TypeError("Task names must be strings")
-        normalized = task_name.lower()
-        if normalized in validated:
-            raise ValueError(f"Duplicate task name after normalization: '{normalized}'")
-        validated[normalized] = validate_task(task, normalized)
-    order: List[str] = []
-    visiting: List[str] = []
-    visited = set()
 
-    def visit(task_name: str) -> None:
-        task_name = task_name.lower()
-        if task_name in visited:
-            return
-        if task_name in visiting:
-            cycle = " -> ".join([*visiting[visiting.index(task_name) :], task_name])
-            raise ValueError(f"Task dependency cycle in stack '{name}': {cycle}")
-        if task_name not in validated:
-            raise ValueError(
-                f"Task '{task_name}' referenced by stack '{name}' is not defined"
-            )
-        visiting.append(task_name)
-        for dependency in validated[task_name].depends_on:
-            visit(dependency)
-        visiting.pop()
-        visited.add(task_name)
-        order.append(task_name)
-
-    for task_name in selected:
-        visit(task_name)
-    return name, [validated[task_name] for task_name in order], path
+def fill_default_paths(configs: Sequence[DmonTaskConfig]) -> None:
+    for config in configs:
+        config.meta_path = config.meta_path or META_PATH_TEMPLATE.format(
+            task=config.task
+        )
+        config.log_path = config.log_path or LOG_PATH_TEMPLATE.format(task=config.task)
+        config.rotate_log_path = (
+            config.rotate_log_path or ROTATE_LOG_PATH_TEMPLATE.format(task=config.task)
+        )
 
 
 def check_name_in_config(name: str) -> bool:

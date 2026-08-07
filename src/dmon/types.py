@@ -17,6 +17,40 @@ else:
 CmdType = Union[str, List[str]]
 
 
+def dump_json(path: PathType, data: Dict, *, exclusive: bool = False) -> None:
+    target = Path(path)
+    if exclusive:
+        descriptor = os.open(
+            target,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(data, stream, indent=2, ensure_ascii=False)
+            stream.flush()
+            os.fsync(stream.fileno())
+        return
+
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=target.parent,
+            prefix=f".{target.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as stream:
+            temporary_path = Path(stream.name)
+            json.dump(data, stream, indent=2, ensure_ascii=False)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary_path, target)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+
 @dataclass
 class DmonTaskConfig:
     task: str = ""
@@ -61,38 +95,7 @@ class DmonMeta(DmonTaskConfig):
     create_time_human: str = "N/A"
 
     def dump(self, path: PathType, *, exclusive: bool = False):
-        target = Path(path)
-        data = asdict(self)
-        if exclusive:
-            descriptor = os.open(
-                target,
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-                0o600,
-            )
-            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-                json.dump(data, stream, indent=2, ensure_ascii=False)
-                stream.flush()
-                os.fsync(stream.fileno())
-            return
-
-        temporary_path = None
-        try:
-            with tempfile.NamedTemporaryFile(
-                mode="w",
-                encoding="utf-8",
-                dir=target.parent,
-                prefix=f".{target.name}.",
-                suffix=".tmp",
-                delete=False,
-            ) as stream:
-                temporary_path = Path(stream.name)
-                json.dump(data, stream, indent=2, ensure_ascii=False)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temporary_path, target)
-        finally:
-            if temporary_path is not None:
-                temporary_path.unlink(missing_ok=True)
+        dump_json(path, asdict(self), exclusive=exclusive)
 
     @staticmethod
     def load(path: PathType) -> Optional["DmonMeta"]:
@@ -102,3 +105,53 @@ class DmonMeta(DmonTaskConfig):
                 data = json.load(f)
                 return DmonMeta(**data)
         return None
+
+
+@dataclass
+class DmonStackTask:
+    task: str
+    pid: int
+    create_time: float
+    meta_path: str
+
+    @staticmethod
+    def from_meta(meta: DmonMeta) -> "DmonStackTask":
+        return DmonStackTask(
+            task=meta.task,
+            pid=meta.pid,
+            create_time=meta.create_time,
+            meta_path=meta.meta_path,
+        )
+
+
+@dataclass
+class DmonStackMeta:
+    stack: str
+    run_id: str = ""
+    state: str = "starting"
+    pid: int = -1
+    create_time: float = -1
+    config_path: str = ""
+    log_path: str = ""
+    tasks: List[DmonStackTask] = field(default_factory=list)
+    error: str = ""
+
+    def dump(self, path: PathType, *, exclusive: bool = False) -> None:
+        dump_json(path, asdict(self), exclusive=exclusive)
+
+    @staticmethod
+    def load(path: PathType) -> Optional["DmonStackMeta"]:
+        target = Path(path)
+        if not target.exists():
+            return None
+        with target.open("r", encoding="utf-8") as stream:
+            data = json.load(stream)
+        if not isinstance(data, dict):
+            raise TypeError("stack metadata must be a JSON object")
+        tasks = data.get("tasks", [])
+        if not isinstance(tasks, list) or not all(
+            isinstance(task, dict) for task in tasks
+        ):
+            raise TypeError("stack metadata tasks must be a list of objects")
+        data["tasks"] = [DmonStackTask(**task) for task in tasks]
+        return DmonStackMeta(**data)

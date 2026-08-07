@@ -166,9 +166,8 @@ sh -c 'echo "dmon up PID=$$"; exec dmon up healthy'
 kill -TERM 12345
 ```
 
-It must perform the same reverse-order cleanup without a traceback. This is a
-signal test, not a supported detached mode; `dmon up` must remain supervised in
-the foreground.
+It must perform the same reverse-order cleanup without a traceback. This checks
+the foreground supervisor; detached supervision is tested separately below.
 
 ### Startup rollback
 
@@ -199,6 +198,41 @@ dmon status never-ready; echo "exit=$?"
 
 The probe must retry quietly until the configured deadline, then report one
 actionable timeout, return non-zero, and stop the task without stale metadata.
+
+### Detached lifecycle and recovery
+
+```sh
+dmon up -d healthy
+dmon status --stack healthy
+dmon up -d healthy; echo "duplicate_exit=$?"
+dmon down healthy
+dmon status --stack healthy; echo "status_exit=$?"
+```
+
+Startup waits for readiness before returning. Status must show one supervisor
+and all three tasks running; the duplicate start must fail without disturbing
+them. `down` must stop tasks in reverse order and remove stack and task metadata.
+
+Test supervisor-crash recovery once on each operating system:
+
+```sh
+dmon up -d healthy
+dmon status --stack healthy  # note the SUPERVISOR PID
+
+# Terminate that PID without allowing graceful cleanup. POSIX:
+kill -KILL 12345
+
+# PowerShell:
+Stop-Process -Id 12345 -Force
+
+dmon status --stack healthy; echo "status_exit=$?"
+dmon down healthy
+```
+
+Replace `12345` with the displayed PID. Status should report an orphaned stack,
+and `down` must still remove every owned process and metadata file. The recovery
+must use persisted PID plus creation time; it must not stop an unrelated process
+that reused a PID or merely shares a task name.
 
 ## Presentation checklist
 

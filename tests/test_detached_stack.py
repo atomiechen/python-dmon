@@ -1,0 +1,320 @@
+from __future__ import annotations
+
+from pathlib import Path
+import json
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+
+import psutil
+import yaml
+
+
+class DetachedStackTest(unittest.TestCase):
+    def run_dmon(self, root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-m", "dmon", *args],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=20,
+            check=False,
+        )
+
+    def assert_dmon_success(
+        self, root: Path, result: subprocess.CompletedProcess[str]
+    ) -> None:
+        diagnostics = result.stderr
+        for log_path in sorted((root / "logs").glob("*.stack.log")):
+            diagnostics += f"\n--- {log_path.name} ---\n"
+            diagnostics += log_path.read_text(encoding="utf-8", errors="replace")
+        self.assertEqual(result.returncode, 0, diagnostics)
+
+    def test_detached_stack_lifecycle_and_duplicate_start(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = {
+                "tasks": {
+                    "service": [
+                        sys.executable,
+                        "-c",
+                        "import time; time.sleep(60)",
+                    ]
+                },
+                "stacks": {"dev": ["service"]},
+                "default_stack": "dev",
+            }
+            (root / "dmon.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+            (root / ".dmon").mkdir()
+            (root / ".dmon" / "dev.stack.json.stop").write_text(
+                "stale\n", encoding="utf-8"
+            )
+            try:
+                started = self.run_dmon(root, "up", "-d")
+                self.assert_dmon_success(root, started)
+                self.assertIn("STACK      : dev", started.stderr)
+                self.assertNotIn("STACK      : 'dev'", started.stderr)
+                self.assertIn("STATUS     : Running", started.stderr)
+
+                status = self.run_dmon(root, "status", "--stack")
+                self.assertEqual(status.returncode, 0, status.stderr)
+                self.assertIn("TASKS      : 1/1 running", status.stderr)
+
+                duplicate = self.run_dmon(root, "up", "--detach", "dev")
+                self.assertNotEqual(duplicate.returncode, 0)
+                self.assertIn("already active", duplicate.stderr)
+
+                (root / "dmon.yaml").unlink()
+                stopped = self.run_dmon(root, "down", "dev")
+                self.assertEqual(stopped.returncode, 0, stopped.stderr)
+                self.assertFalse((root / ".dmon" / "dev.stack.json").exists())
+                self.assertFalse((root / ".dmon" / "service.meta.json").exists())
+            finally:
+                if (root / ".dmon" / "dev.stack.json").exists():
+                    self.run_dmon(root, "down")
+
+    def test_concurrent_detached_start_has_one_owner(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = {
+                "tasks": {
+                    "service": [
+                        sys.executable,
+                        "-c",
+                        "import time; time.sleep(60)",
+                    ]
+                },
+                "stacks": {"dev": ["service"]},
+            }
+            (root / "dmon.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+            command = [sys.executable, "-m", "dmon", "up", "-d", "dev"]
+            try:
+                processes = [
+                    subprocess.Popen(
+                        command,
+                        cwd=root,
+                        text=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                    )
+                    for _ in range(2)
+                ]
+                results = [process.communicate(timeout=20) for process in processes]
+                self.assertEqual(
+                    sorted(process.returncode for process in processes), [0, 1]
+                )
+                self.assertTrue(
+                    any(
+                        "another dmon process" in stderr or "already active" in stderr
+                        for _, stderr in results
+                    ),
+                    results,
+                )
+            finally:
+                if (root / ".dmon" / "dev.stack.json").exists():
+                    self.run_dmon(root, "down", "dev")
+
+    def test_stale_stack_metadata_requires_explicit_cleanup(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = {
+                "tasks": {
+                    "service": [
+                        sys.executable,
+                        "-c",
+                        "import time; time.sleep(60)",
+                    ]
+                },
+                "stacks": {"dev": ["service"]},
+            }
+            (root / "dmon.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+            meta_dir = root / ".dmon"
+            meta_dir.mkdir()
+            meta_path = meta_dir / "dev.stack.json"
+            meta_path.write_text(
+                json.dumps(
+                    {
+                        "stack": "dev",
+                        "state": "failed",
+                        "pid": -1,
+                        "create_time": -1.0,
+                        "config_path": str(root / "dmon.yaml"),
+                        "log_path": str(root / "logs" / "dev.stack.log"),
+                        "tasks": [],
+                        "error": "previous failure",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            refused = self.run_dmon(root, "up", "-d", "dev")
+            self.assertNotEqual(refused.returncode, 0)
+            self.assertIn("run 'dmon down'", refused.stderr)
+            self.assertTrue(meta_path.exists())
+
+            stopped = self.run_dmon(root, "down", "dev")
+            self.assertEqual(stopped.returncode, 0, stopped.stderr)
+            self.assertFalse(meta_path.exists())
+
+    def test_detached_startup_failure_rolls_back_started_tasks(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = {
+                "tasks": {
+                    "service": [
+                        sys.executable,
+                        "-c",
+                        "import time; time.sleep(60)",
+                    ],
+                    "missing": ["dmon-executable-that-does-not-exist"],
+                },
+                "stacks": {"dev": ["service", "missing"]},
+            }
+            (root / "dmon.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+            meta_path = root / ".dmon" / "dev.stack.json"
+            try:
+                started = self.run_dmon(root, "up", "-d", "dev")
+                self.assertNotEqual(started.returncode, 0)
+                self.assertFalse((root / ".dmon" / "service.meta.json").exists())
+                self.assertFalse((root / ".dmon" / "missing.meta.json").exists())
+            finally:
+                if meta_path.exists():
+                    stopped = self.run_dmon(root, "down", "dev")
+                    self.assertEqual(stopped.returncode, 0, stopped.stderr)
+
+    def test_down_can_cancel_detached_startup(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = {
+                "tasks": {
+                    "service": {
+                        "cmd": [
+                            sys.executable,
+                            "-c",
+                            "import time; time.sleep(60)",
+                        ],
+                        "ready": {
+                            "command": [
+                                sys.executable,
+                                "-c",
+                                "raise SystemExit(1)",
+                            ],
+                            "timeout": 30,
+                            "interval": 0.1,
+                        },
+                    }
+                },
+                "stacks": {"dev": ["service"]},
+            }
+            (root / "dmon.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+            meta_path = root / ".dmon" / "dev.stack.json"
+            command = [sys.executable, "-m", "dmon", "up", "-d", "dev"]
+            starter = subprocess.Popen(
+                command,
+                cwd=root,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            try:
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    if meta_path.exists():
+                        stack_meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                        if stack_meta.get("tasks"):
+                            break
+                    time.sleep(0.05)
+                else:
+                    self.fail("detached stack did not begin startup")
+
+                stopped = self.run_dmon(root, "down", "dev")
+                self.assertEqual(stopped.returncode, 0, stopped.stderr)
+                starter.communicate(timeout=10)
+                self.assertNotEqual(starter.returncode, 0)
+                self.assertFalse(meta_path.exists())
+                self.assertFalse((root / ".dmon" / "service.meta.json").exists())
+            finally:
+                if starter.poll() is None:
+                    starter.kill()
+                    starter.wait(timeout=5)
+                if meta_path.exists():
+                    self.run_dmon(root, "down", "dev")
+
+    def test_down_recovers_after_supervisor_is_killed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = {
+                "tasks": {
+                    "service": [
+                        sys.executable,
+                        "-c",
+                        "import time; time.sleep(60)",
+                    ]
+                },
+                "stacks": {"dev": ["service"]},
+            }
+            (root / "dmon.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+            meta_path = root / ".dmon" / "dev.stack.json"
+            try:
+                started = self.run_dmon(root, "up", "-d", "dev")
+                self.assert_dmon_success(root, started)
+                stack_meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                supervisor = psutil.Process(stack_meta["pid"])
+                supervisor.kill()
+                supervisor.wait(timeout=5)
+
+                stopped = self.run_dmon(root, "down", "dev")
+                self.assertEqual(stopped.returncode, 0, stopped.stderr)
+                self.assertFalse(meta_path.exists())
+                self.assertFalse((root / ".dmon" / "service.meta.json").exists())
+            finally:
+                if meta_path.exists():
+                    self.run_dmon(root, "down", "dev")
+
+    def test_runtime_failure_is_recorded_after_owned_tasks_are_cleaned(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = {
+                "tasks": {
+                    "service": [
+                        sys.executable,
+                        "-c",
+                        "import time; time.sleep(60)",
+                    ],
+                    "failing": [
+                        sys.executable,
+                        "-c",
+                        "import time; time.sleep(0.8); raise SystemExit(7)",
+                    ],
+                },
+                "stacks": {"dev": ["service", "failing"]},
+            }
+            (root / "dmon.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+            meta_path = root / ".dmon" / "dev.stack.json"
+            try:
+                started = self.run_dmon(root, "up", "-d", "dev")
+                self.assert_dmon_success(root, started)
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    status = self.run_dmon(root, "status", "--stack", "dev")
+                    if "STATUS     : Failed" in status.stderr:
+                        break
+                    time.sleep(0.1)
+                else:
+                    self.fail("detached stack did not report its runtime failure")
+
+                self.assertIn("STATUS     : Failed", status.stderr)
+                self.assertFalse((root / ".dmon" / "service.meta.json").exists())
+                self.assertFalse((root / ".dmon" / "failing.meta.json").exists())
+                stopped = self.run_dmon(root, "down", "dev")
+                self.assertEqual(stopped.returncode, 0, stopped.stderr)
+            finally:
+                if meta_path.exists():
+                    self.run_dmon(root, "down", "dev")
+
+
+if __name__ == "__main__":
+    unittest.main()
