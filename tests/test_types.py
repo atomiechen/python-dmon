@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import tempfile
+import threading
 import unittest
+from unittest.mock import patch
 
 from dmon.types import DmonMeta, DmonStackMeta, DmonStackTask
 
@@ -47,6 +49,32 @@ class DmonMetaTest(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 DmonMeta(task="second").dump(path, exclusive=True)
             self.assertEqual(DmonMeta.load(path).task, "first")
+
+    def test_exclusive_dump_publishes_only_complete_json(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "task.meta.json"
+            writing = threading.Event()
+            release = threading.Event()
+            original_dump = json.dump
+
+            def delayed_dump(*args, **kwargs):
+                writing.set()
+                self.assertTrue(release.wait(timeout=5))
+                return original_dump(*args, **kwargs)
+
+            thread = threading.Thread(
+                target=lambda: DmonMeta(task="complete").dump(path, exclusive=True)
+            )
+            with patch("dmon.types.json.dump", side_effect=delayed_dump):
+                thread.start()
+                self.assertTrue(writing.wait(timeout=5))
+                self.assertFalse(path.exists())
+                release.set()
+                thread.join(timeout=5)
+
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(DmonMeta.load(path).task, "complete")
+            self.assertEqual(list(path.parent.glob("*.tmp")), [])
 
     def test_regular_dump_atomically_replaces_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
