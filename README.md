@@ -6,9 +6,9 @@
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/atomiechen/python-dmon)
 
 
-A lightweight, cross-platform daemon manager that runs any command — called a *task* — as a background process. 
-It also supports logging and log rotation out of the box. 
-**No Docker or extra dependencies required**. 
+A lightweight, cross-platform daemon manager that runs any command — called a *task* — as a background process.
+It also supports logging and log rotation out of the box.
+**No external runtime required**.
 
 Shipped as the CLI tool `dmon`.
 It is a Python-based and more powerful successor to the [handy-backend shell scripts](https://github.com/atomiechen/handy-backend).
@@ -17,12 +17,13 @@ It is a Python-based and more powerful successor to the [handy-backend shell scr
 ## Features
 
 - 🖥️ **Cross-platform:** Works on Linux, macOS, and Windows.
-- ⚡ **Lightweight:** Pure Python, no Docker or external dependencies needed.
+- ⚡ **Lightweight:** No daemon service or container runtime required.
 - 🧩 **Flexible tasks:** Tasks can be configured in `pyproject.toml` or `dmon.yaml`; or run ad-hoc commands directly.
 - 🔗 **Supervised stacks:** Start dependent tasks in order, wait for HTTP, TCP,
   or command readiness, and report runtime degradation.
 - 🌙 **Foreground or detached:** Keep a stack attached for development, or run
-  it under a recoverable background supervisor with `stack up -d` and `stack down`.
+  it under a recoverable background supervisor with `dmon stack up -d` and
+  `dmon stack down`.
 - 🪵 **Logging & log rotation:** Keep active log files manageable, with optional archive retention limits.
 
 ![dmon-demo-gif](https://github.com/user-attachments/assets/9bae2f46-5ef4-4784-aced-18d573204efc)
@@ -87,6 +88,8 @@ app = ["python", "-u", "server.py"]  # option 1: exec form
 
 Commands can be a single string (run in shell), or list of strings (exec form).
 See [Example Configuration](#example-configuration) for more configuration options.
+Without `--config`, dmon searches the current directory and its parents for
+`dmon.yaml`, `dmon.yml`, or `pyproject.toml`.
 
 
 ### Run tasks
@@ -164,8 +167,8 @@ readiness probe. A startup failure or readiness timeout rolls back every task
 started by that invocation. After startup, an exited task marks the stack as
 degraded while unrelated tasks continue running, matching Docker Compose's
 default behavior. Use `--abort-on-exit` when the whole stack should stop after
-any runtime exit. Ctrl-C, SIGTERM, and `dmon stack down` always clean up the
-tasks started by the stack in reverse order.
+any runtime exit. Ctrl-C or SIGTERM cleans up a foreground stack in reverse
+order. Use `dmon stack down` to clean up a detached stack.
 
 Foreground `dmon stack up` displays new task output with task-name prefixes,
 while retaining it in each task's configured `log_path`. Detached mode does not
@@ -187,10 +190,13 @@ stack's exit policy.
 Or use `--all` to operate on all tasks:
 
 ```sh
-# all configured tasks
-dmon start/stop/restart --all
-# all running tasks
-dmon stop/status --all
+# All configured tasks
+dmon start --all
+dmon restart --all
+
+# All recorded task metadata in the project
+dmon status --all
+dmon stop --all
 ```
 
 If you have defined `default_task`, or only one task is defined in the config file, you can omit the task name:
@@ -210,6 +216,12 @@ dmon start --config /path/to/dmon.yaml app  # YAML
 dmon start --config /path/to/pyproject.toml app  # or TOML
 dmon start -c /path/to/dir app  # shorter, dir with `dmon.y(a)ml` or `pyproject.toml`
 ```
+
+The same config discovery and selection rules apply to stacks. A stack name can
+be omitted when `default_stack` is set or only one stack is configured. Options
+belonging to a stack operation go after that operation and may appear before or
+after the stack name; for example, `dmon stack up -d dev` and `dmon stack up dev
+-d` are equivalent.
 
 And yes, you can use `dmon` to run in a nested manner:
 
@@ -244,7 +256,7 @@ dmon run --cwd /path/to/script bash myscript.sh
 > If no name is provided, `dmon` automatically assigns a fixed task name `default_run` to prevent duplicate runs.
 
 
-### List all running tasks
+### List recorded tasks and their status
 
 ```sh
 dmon list

@@ -183,8 +183,15 @@ must be stopped and have no live metadata.
 
 ### Runtime degradation and fail-fast cleanup
 
+Terminal 1:
+
 ```sh
 dmon stack up runtime-failure
+```
+
+After `delayed-failure` exits, inspect the remaining task from Terminal 2:
+
+```sh
 dmon status stack-db; echo "exit=$?"
 ```
 
