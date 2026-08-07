@@ -24,6 +24,8 @@ validation and CI to detect an out-of-date lockfile.
 - `control.py` owns individual task lifecycle and process metadata.
 - `logs.py` reads and follows task logs without importing process control.
 - `runner.py` captures task output and rotates logs.
+- `results.py` contains immutable task and stack snapshots shared by human,
+  Python, and machine-readable interfaces.
 - `supervisor.py` coordinates dependent tasks, readiness, monitoring, and
   reverse-order cleanup, including persisted foreground and detached stack
   ownership.

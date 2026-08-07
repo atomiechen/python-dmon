@@ -13,6 +13,7 @@ import psutil
 from termcolor import colored
 
 from .constants import DEFAULT_META_DIR, META_SUFFIX, ON_WINDOWS
+from .results import CommandSnapshot, TaskSnapshot
 from .types import DmonTaskConfig, DmonMeta, PathType
 from .utils import len_ansi, pad_ansi
 
@@ -497,7 +498,7 @@ def restart(
 
 def status(meta_paths: Sequence[PathType]):
     ret = 0
-    metas = []
+    snapshots = []
     for idx, meta_path in enumerate(meta_paths):
         meta_path = Path(meta_path).resolve()
         try:
@@ -527,15 +528,16 @@ def status(meta_paths: Sequence[PathType]):
             )
             ret |= 1
         else:
-            print_status(meta)
-            metas.append(meta)
-            if not check_running(meta.pid, meta.create_time):
+            snapshot = task_snapshot(meta)
+            print_task_status(snapshot)
+            snapshots.append(snapshot)
+            if not snapshot.running:
                 ret |= 1
         if idx < len(meta_paths) - 1:
             print("---", file=sys.stderr)
-    if metas:
+    if snapshots:
         print("\nProcess Tree:", file=sys.stderr)
-        print_process_table(metas)
+        print_task_table(snapshots)
     return ret
 
 
@@ -580,33 +582,64 @@ def check_running(pid: int, create_time: float) -> bool:
         return False
 
 
+def task_snapshot(meta: DmonMeta) -> TaskSnapshot:
+    command: CommandSnapshot = (
+        tuple(meta.cmd) if isinstance(meta.cmd, list) else meta.cmd
+    )
+    return TaskSnapshot(
+        task=meta.task,
+        pid=meta.pid,
+        status=("running" if check_running(meta.pid, meta.create_time) else "exited"),
+        command=command,
+        working_directory=meta.cwd,
+        create_time=meta.create_time,
+        create_time_human=meta.create_time_human,
+        meta_path=meta.meta_path,
+        log_rotate=meta.log_rotate,
+        log_path=meta.log_path,
+        rotate_log_path=meta.rotate_log_path,
+        log_max_size=meta.log_max_size,
+        log_backup_count=meta.log_backup_count,
+        rotate_log_max_size=meta.rotate_log_max_size,
+        rotate_log_backup_count=meta.rotate_log_backup_count,
+    )
+
+
+def display_command(command: CommandSnapshot):
+    return list(command) if isinstance(command, tuple) else command
+
+
 def print_status(meta: DmonMeta):
+    print_task_status(task_snapshot(meta))
+
+
+def print_task_status(snapshot: TaskSnapshot) -> None:
     status = (
         colored("Running", on_color="on_green")
-        if check_running(meta.pid, meta.create_time)
+        if snapshot.running
         else colored("Exited", on_color="on_light_red")
     )
 
     # key-value pairs with aligned keys
     rows = [
-        ("TASK", colored(meta.task, "cyan", attrs=["bold"])),
-        ("PID", colored(str(meta.pid), "cyan", attrs=["bold"])),
+        ("TASK", colored(snapshot.task, "cyan", attrs=["bold"])),
+        ("PID", colored(str(snapshot.pid), "cyan", attrs=["bold"])),
         ("STATUS", status),
-        ("CMD", meta.cmd),
-        ("WORKING DIR", meta.cwd),
-        ("CREATE TIME", meta.create_time_human),
-        ("META PATH", meta.meta_path),
-        ("LOG ROTATE", meta.log_rotate),
-        ("LOG PATH", meta.log_path),
+        ("CMD", display_command(snapshot.command)),
+        ("WORKING DIR", snapshot.working_directory),
+        ("CREATE TIME", snapshot.create_time_human),
+        ("META PATH", snapshot.meta_path),
+        ("LOG ROTATE", snapshot.log_rotate),
+        ("LOG PATH", snapshot.log_path),
     ]
-    if meta.log_rotate:
-        rows.append(("ROTATE LOG PATH", meta.rotate_log_path))
-        rows.append(("LOG MAX SIZE", f"{meta.log_max_size} MB"))
-        if meta.log_backup_count is not None:
-            rows.append(("LOG BACKUP COUNT", meta.log_backup_count))
-        rows.append(("ROTATE LOG MAX SIZE", f"{meta.rotate_log_max_size} MB"))
-        if meta.rotate_log_backup_count is not None:
-            rows.append(("ROTATE LOG BACKUP COUNT", meta.rotate_log_backup_count))
+    if snapshot.log_rotate:
+        rows.append(("ROTATE LOG PATH", snapshot.rotate_log_path))
+        rows.append(("LOG MAX SIZE", f"{snapshot.log_max_size} MB"))
+        if snapshot.log_backup_count is not None:
+            rows.append(("LOG BACKUP COUNT", snapshot.log_backup_count))
+        rows.append(("ROTATE LOG MAX SIZE", f"{snapshot.rotate_log_max_size} MB"))
+        if snapshot.rotate_log_backup_count is not None:
+            rows.append(("ROTATE LOG BACKUP COUNT", snapshot.rotate_log_backup_count))
 
     # calculate the max width of the keys
     key_width = max(len(key) for key, _ in rows)
@@ -635,6 +668,10 @@ def get_table_row(p: psutil.Process, target_ppid: int, prefix=""):
 
 
 def print_process_table(metas: List[DmonMeta], full_width: bool = False):
+    return print_task_table([task_snapshot(meta) for meta in metas], full_width)
+
+
+def print_task_table(snapshots: Sequence[TaskSnapshot], full_width: bool = False):
     headers = ("TASK", "PID", "PPID", "STATUS", "CMD", "CREATE TIME", "LOG PATH")
     align = ("<", ">", ">", "<", "<", "<", "<")
 
@@ -643,8 +680,8 @@ def print_process_table(metas: List[DmonMeta], full_width: bool = False):
     rows.append(headers)
 
     processes = []
-    for meta in metas:
-        proc = get_unique_process(meta.pid, meta.create_time)
+    for snapshot in snapshots:
+        proc = get_unique_process(snapshot.pid, snapshot.create_time)
         if proc:
             status = colored("Running", on_color="on_green")
             ppid = proc.ppid()
@@ -654,13 +691,13 @@ def print_process_table(metas: List[DmonMeta], full_width: bool = False):
             ppid = "N/A"
         rows.append(
             (
-                colored(meta.task, "cyan", attrs=["bold"]),
-                colored(meta.pid, "cyan", attrs=["bold"]),
+                colored(snapshot.task, "cyan", attrs=["bold"]),
+                colored(snapshot.pid, "cyan", attrs=["bold"]),
                 ppid,
                 status,
-                meta.cmd,
-                meta.create_time_human,
-                meta.log_path,
+                display_command(snapshot.command),
+                snapshot.create_time_human,
+                snapshot.log_path,
             )
         )
         # add child processes indented
@@ -711,7 +748,7 @@ def get_meta_paths(dir: PathType) -> List[Path]:
 def list_processes(dir: PathType, full_width: bool):
     target_dmon_dir = Path(dir).resolve()
     meta_paths = get_meta_paths(target_dmon_dir)
-    metas = []
+    snapshots = []
     errors = 0
     for meta_path in meta_paths:
         try:
@@ -728,11 +765,11 @@ def list_processes(dir: PathType, full_width: bool):
             errors += 1
             continue
         if meta is not None:
-            metas.append(meta)
+            snapshots.append(task_snapshot(meta))
     # sort by name (case-insensitive)
-    metas.sort(key=lambda m: m.task.lower())
-    n_task = len(metas)
-    processes = print_process_table(metas, full_width)
+    snapshots.sort(key=lambda item: item.task.lower())
+    n_task = len(snapshots)
+    processes = print_task_table(snapshots, full_width)
     n_proc = len(processes)
     print(
         f"\nFound {n_task} task{'s' if n_task > 1 else ''} ({n_proc} process{'es' if n_proc > 1 else ''}) in {target_dmon_dir}",

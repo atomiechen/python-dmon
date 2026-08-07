@@ -20,13 +20,15 @@ from .control import (
     ensure_log_dir,
     ensure_meta_dir,
     get_unique_process,
-    print_process_table,
+    print_task_table,
     start_single_result,
+    task_snapshot,
     task_environment,
     terminate_process,
 )
 from .constants import STACK_META_SUFFIX
 from .logs import StackLogFollower, start_stack_log_follower
+from .results import StackSnapshot
 from .types import (
     CmdType,
     DmonMeta,
@@ -821,28 +823,43 @@ def status_stack(meta_path: Path) -> int:
     if meta is None:
         print(f"Stack metadata not found: {meta_path.resolve()}", file=sys.stderr)
         return 1
-    print_stack_status(meta, show_tasks=True)
-    supervisor_running = stack_process(meta) is not None
-    tasks_running = all(
-        check_running(task.pid, task.create_time) for task in meta.tasks
-    )
-    return 0 if meta.state == "running" and supervisor_running and tasks_running else 1
+    snapshot = stack_snapshot(meta)
+    print_stack_snapshot(snapshot, show_tasks=True)
+    return 0 if snapshot.running else 1
 
 
 def stack_status(meta: DmonStackMeta) -> tuple[str, int]:
+    snapshot = stack_snapshot(meta)
+    return snapshot.status.capitalize(), snapshot.running_tasks
+
+
+def stack_snapshot(meta: DmonStackMeta) -> StackSnapshot:
     supervisor_running = stack_process(meta) is not None
-    running_tasks = sum(
-        1 for task in meta.tasks if check_running(task.pid, task.create_time)
-    )
+    tasks = tuple(task_snapshot(task) for task in stack_task_metas(meta))
+    running_tasks = sum(1 for task in tasks if task.running)
     if meta.state == "failed":
-        status = "Failed"
+        status = "failed"
     elif not supervisor_running:
-        status = "Orphaned" if running_tasks else "Exited"
+        status = "orphaned" if running_tasks else "exited"
     elif meta.state == "running":
-        status = "Running" if running_tasks == len(meta.tasks) else "Degraded"
+        status = "running" if running_tasks == len(meta.tasks) else "degraded"
     else:
-        status = meta.state.capitalize()
-    return status, running_tasks
+        status = meta.state
+    return StackSnapshot(
+        stack=meta.stack,
+        status=status,
+        mode=meta.mode,
+        supervisor_pid=meta.pid,
+        supervisor_create_time=meta.create_time,
+        state=meta.state,
+        running_tasks=running_tasks,
+        total_tasks=len(tasks),
+        abort_on_exit=meta.abort_on_exit,
+        config_path=meta.config_path,
+        log_path=meta.log_path,
+        error=meta.error,
+        tasks=tasks,
+    )
 
 
 def stack_status_color(status: str) -> str:
@@ -855,29 +872,35 @@ def stack_status_color(status: str) -> str:
 
 
 def print_stack_status(meta: DmonStackMeta, *, show_tasks: bool = False) -> None:
-    status, running_tasks = stack_status(meta)
-    status_color = stack_status_color(status)
-    print(f"STACK      : {stack_table_value(meta.stack)}", file=sys.stderr)
+    print_stack_snapshot(stack_snapshot(meta), show_tasks=show_tasks)
+
+
+def print_stack_snapshot(snapshot: StackSnapshot, *, show_tasks: bool = False) -> None:
+    display_status = snapshot.status.capitalize()
+    status_color = stack_status_color(display_status)
+    print(f"STACK      : {stack_table_value(snapshot.stack)}", file=sys.stderr)
     print(
-        "STATUS     : " + colored(status, color=status_color, attrs=["bold"]),
+        "STATUS     : " + colored(display_status, color=status_color, attrs=["bold"]),
         file=sys.stderr,
     )
-    print(f"MODE       : {meta.mode}", file=sys.stderr)
+    print(f"MODE       : {snapshot.mode}", file=sys.stderr)
     print(
-        f"SUPERVISOR : {colored(str(meta.pid), 'cyan', attrs=['bold'])}",
+        f"SUPERVISOR : {colored(str(snapshot.supervisor_pid), 'cyan', attrs=['bold'])}",
         file=sys.stderr,
     )
-    print(f"TASKS      : {running_tasks}/{len(meta.tasks)} running", file=sys.stderr)
-    policy = "abort-on-exit" if meta.abort_on_exit else "keep-running"
-    print(f"EXIT POLICY: {policy}", file=sys.stderr)
-    print(f"CONFIG     : {meta.config_path}", file=sys.stderr)
-    if meta.mode == "detached":
-        print(f"LOG        : {meta.log_path}", file=sys.stderr)
-    if meta.error:
-        print(f"ERROR      : {meta.error}", file=sys.stderr)
-    if show_tasks and meta.tasks:
+    print(
+        f"TASKS      : {snapshot.running_tasks}/{snapshot.total_tasks} running",
+        file=sys.stderr,
+    )
+    print(f"EXIT POLICY: {snapshot.exit_policy}", file=sys.stderr)
+    print(f"CONFIG     : {snapshot.config_path}", file=sys.stderr)
+    if snapshot.mode == "detached":
+        print(f"LOG        : {snapshot.log_path}", file=sys.stderr)
+    if snapshot.error:
+        print(f"ERROR      : {snapshot.error}", file=sys.stderr)
+    if show_tasks and snapshot.tasks:
         print("\nTask Processes:", file=sys.stderr)
-        print_process_table(stack_task_metas(meta))
+        print_task_table(snapshot.tasks)
 
 
 def stack_task_metas(meta: DmonStackMeta) -> list[DmonMeta]:
@@ -923,17 +946,17 @@ def list_stacks(meta_dir: Path) -> int:
             if meta is not None:
                 metas.append(meta)
 
+    snapshots = [stack_snapshot(meta) for meta in metas]
     rows = []
-    for meta in metas:
-        status, running = stack_status(meta)
+    for snapshot in snapshots:
         rows.append(
             (
-                meta.stack,
-                status,
-                str(meta.pid),
-                f"{running}/{len(meta.tasks)}",
-                meta.mode,
-                "abort-on-exit" if meta.abort_on_exit else "keep-running",
+                snapshot.stack,
+                snapshot.status.capitalize(),
+                str(snapshot.supervisor_pid),
+                f"{snapshot.running_tasks}/{snapshot.total_tasks}",
+                snapshot.mode,
+                snapshot.exit_policy,
             )
         )
     headers = ("STACK", "STATUS", "SUPERVISOR", "TASKS", "MODE", "EXIT POLICY")
