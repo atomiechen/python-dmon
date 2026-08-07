@@ -13,8 +13,8 @@ from dmon.cli import main
 class CliTest(unittest.TestCase):
     def test_stop_with_config_resolves_metadata_from_config_directory(self) -> None:
         original_cwd = Path.cwd()
-        try:
-            with tempfile.TemporaryDirectory() as temporary:
+        with tempfile.TemporaryDirectory() as temporary:
+            try:
                 root = Path(temporary)
                 config = root / "project" / "dmon.yaml"
                 config.parent.mkdir()
@@ -33,8 +33,8 @@ class CliTest(unittest.TestCase):
                 mocked_stop.assert_called_once_with(
                     [(config.parent / ".dmon" / "app.meta.json").resolve()]
                 )
-        finally:
-            os.chdir(original_cwd)
+            finally:
+                os.chdir(original_cwd)
 
 
 if __name__ == "__main__":
