@@ -112,6 +112,26 @@ def validate_task(task, name: str) -> DmonTaskConfig:
                 )
             ret.env = cast(Dict[str, str], task["env"])
 
+        if "env_file" in task:
+            env_file = task["env_file"]
+            if isinstance(env_file, str):
+                env_files = [env_file]
+            elif isinstance(env_file, list) and all(
+                isinstance(item, str) and item for item in env_file
+            ):
+                env_files = env_file
+            else:
+                raise TypeError(
+                    f"Task '{name}' 'env_file' field must be a non-empty string "
+                    "or list of non-empty strings"
+                )
+            if not env_files or any(not item for item in env_files):
+                raise TypeError(
+                    f"Task '{name}' 'env_file' field must be a non-empty string "
+                    "or list of non-empty strings"
+                )
+            ret.env_files = env_files
+
         if "override_env" in task:
             if not isinstance(task["override_env"], bool):
                 raise TypeError(f"Task '{name}' 'override_env' field must be a boolean")

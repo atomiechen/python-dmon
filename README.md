@@ -363,9 +363,10 @@ tasks:
     # Command to run; can be a string (run in shell) or list of strings (exec form)
     cmd: ["python", "server.py"]  # required
     cwd: "/path/to/working/dir"  # (default: current dir)
+    env_file: [".env", ".env.local"]  # optional; later files override earlier files
     env:  # (default: inherit from parent process)
       PYTHONUNBUFFERED: "1"
-    override_env: false  # override parent env and only use env defined here
+    override_env: false  # true omits parent env; use env_file and env only
     log_path: "logs/<task>.log" # path to log file
     log_rotate: false  # enable log rotation
     log_max_size: 5  # max log file size before rotation in MB
@@ -385,6 +386,16 @@ stacks:
 default_stack: dev
 ```
 
+`env_file` accepts one path or an ordered list of dotenv files. Paths are
+relative to the dmon configuration file. Later files override earlier files,
+the existing process environment overrides file values, and the explicit `env`
+table has highest priority. Set `override_env: true` to omit the existing
+process environment. Standard dotenv `${NAME}` expansion can refer to earlier
+values in the same file or any earlier file in the list. Missing files and keys
+without assigned values fail startup without creating task metadata.
+Environment values and environment-file paths are never written to metadata or
+JSON inspection output.
+
 In TOML, write like this:
 
 ```toml
@@ -398,7 +409,14 @@ another_task = "cd subdir && ls && bash start.sh"
 default_task = "your_task_name"
 ```
 
-All paths can be absolute or relative to the **config file location**.
+All paths, including `env_file`, can be absolute or relative to the **config
+file location**.
+
+YAML anchors and merge keys can reuse task fragments within one configuration
+file. Task dependencies are resolved transitively and cycles are rejected.
+dmon intentionally does not recursively include or merge other configuration
+files; keeping one path owner makes command, environment, log, and metadata
+paths unambiguous.
 
 
 ## Under the Hood

@@ -13,6 +13,8 @@ from typing import Iterator, List, Optional, Sequence, TextIO
 import warnings
 
 import psutil
+from dotenv import dotenv_values
+from dotenv.variables import parse_variables
 from termcolor import colored
 
 from .constants import DEFAULT_META_DIR, META_SUFFIX, ON_WINDOWS
@@ -154,7 +156,18 @@ def start_single_result(cfg: DmonTaskConfig) -> StartResult:
     ensure_meta_dir(meta_path)
     ensure_log_dir(log_path)
 
-    env = task_environment(cfg)
+    try:
+        env = task_environment(cfg)
+    except (OSError, ValueError) as error:
+        print(
+            colored(
+                f"Start failed for task '{cfg.task}': {error}",
+                color="red",
+                attrs=["bold"],
+            ),
+            file=sys.stderr,
+        )
+        return StartResult(1)
 
     shell = isinstance(cfg.cmd, str)
 
@@ -310,10 +323,34 @@ def start_single_result(cfg: DmonTaskConfig) -> StartResult:
 
 
 def task_environment(cfg: DmonTaskConfig):
+    file_env = {}
+    for value in cfg.env_files:
+        path = Path(value).resolve()
+        if not path.is_file():
+            raise FileNotFoundError(
+                f"environment file not found for task '{cfg.task}': {path}"
+            )
+        parsed = dotenv_values(path, encoding="utf-8", interpolate=False)
+        missing = [key for key, item in parsed.items() if item is None]
+        if missing:
+            names = ", ".join(sorted(missing))
+            raise ValueError(
+                f"environment file for task '{cfg.task}' contains keys without "
+                f"values: {names}"
+            )
+        inherited = {} if cfg.override_env else os.environ
+        resolved = {}
+        for key, item in parsed.items():
+            assert item is not None
+            context = {**inherited, **file_env, **resolved}
+            resolved[key] = "".join(
+                atom.resolve(context) for atom in parse_variables(item)
+            )
+        file_env.update(resolved)
     if cfg.override_env:
-        return cfg.env
-    if cfg.env:
-        return {**os.environ, **cfg.env}
+        return {**file_env, **cfg.env}
+    if file_env or cfg.env:
+        return {**file_env, **os.environ, **cfg.env}
     return None
 
 
@@ -812,7 +849,18 @@ def execute(cfg: DmonTaskConfig):
     """
     cwd = Path(cfg.cwd).resolve()
 
-    env = task_environment(cfg)
+    try:
+        env = task_environment(cfg)
+    except (OSError, ValueError) as error:
+        print(
+            colored(
+                f"Exec failed for task '{cfg.task}': {error}",
+                color="red",
+                attrs=["bold"],
+            ),
+            file=sys.stderr,
+        )
+        return 1
 
     shell = isinstance(cfg.cmd, str)
     if ON_WINDOWS and isinstance(cfg.cmd, list) and len(cfg.cmd) > 0:

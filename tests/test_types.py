@@ -91,10 +91,15 @@ class DmonMetaTest(unittest.TestCase):
     def test_task_metadata_never_persists_environment_values(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "task.meta.json"
-            DmonMeta(task="private", env={"SECRET_TOKEN": "do-not-store"}).dump(path)
+            DmonMeta(
+                task="private",
+                env={"SECRET_TOKEN": "do-not-store"},
+                env_files=["private.env"],
+            ).dump(path)
 
             data = json.loads(path.read_text(encoding="utf-8"))
             self.assertNotIn("env", data)
+            self.assertNotIn("env_files", data)
             self.assertNotIn("do-not-store", path.read_text(encoding="utf-8"))
             loaded = DmonMeta.load(path)
             self.assertIsNotNone(loaded)

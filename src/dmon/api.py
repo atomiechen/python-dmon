@@ -44,6 +44,7 @@ class Dmon:
 
     def start(self, *tasks: str) -> BatchResult:
         names, configs, _ = self._tasks(tasks)
+        self._validate_environments(configs)
         results = []
         with self._operation():
             for name, config in zip(names, configs):
@@ -82,6 +83,7 @@ class Dmon:
 
     def restart(self, *tasks: str) -> BatchResult:
         names, configs, _ = self._tasks(tasks)
+        self._validate_environments(configs)
         results = []
         with self._operation():
             for name, config in zip(names, configs):
@@ -161,6 +163,7 @@ class Dmon:
             ):
                 raise DmonConfigError(f"{name} must be finite and greater than zero")
         names, configs, _ = self._tasks(tasks)
+        self._validate_environments(configs)
         results = []
         with self._operation():
             for name, config in zip(names, configs):
@@ -223,6 +226,9 @@ class Dmon:
             config.meta_path = self._resolve_path(project, config.meta_path)
             config.log_path = self._resolve_path(project, config.log_path)
             config.rotate_log_path = self._resolve_path(project, config.rotate_log_path)
+            config.env_files = [
+                self._resolve_path(project, value) for value in config.env_files
+            ]
         return names, configs, project
 
     def _project(self) -> Path:
@@ -231,6 +237,14 @@ class Dmon:
         except (OSError, ValueError, TypeError) as error:
             raise DmonConfigError(str(error)) from error
         return path.parent
+
+    @staticmethod
+    def _validate_environments(configs) -> None:
+        try:
+            for config in configs:
+                task_environment(config)
+        except (OSError, ValueError) as error:
+            raise DmonConfigError(str(error)) from error
 
     @contextmanager
     def _operation(self) -> Iterator[None]:

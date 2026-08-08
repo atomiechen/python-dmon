@@ -135,6 +135,11 @@ output so machine-readable output can be added without breaking terminal use.
 
 - Validate configuration once at the boundary. Runtime code consumes normalized
   values rather than maintaining a second set of rules.
+- Task environment precedence is explicit `env`, inherited process environment,
+  later `env_file`, then earlier `env_file`. `override_env` removes only the
+  inherited process environment, including from dotenv expansion. Later dotenv
+  files may expand values resolved by earlier files. Environment-file paths are
+  config-relative; values never enter metadata or structured inspection output.
 - Dependency graphs reject missing tasks and cycles before starting anything.
 - Readiness supports one probe per task: HTTP, TCP, or command. Timeout and retry
   interval are bounded and use a monotonic clock.

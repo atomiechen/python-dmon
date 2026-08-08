@@ -73,6 +73,48 @@ class DetachedStackTest(unittest.TestCase):
             self.assertIn("metadata cannot be read", started.stderr)
             self.assertTrue(corrupt.exists())
 
+    def test_detached_stack_loads_environment_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "environment.txt"
+            (root / ".env").write_text(
+                f"DMON_STACK_OUTPUT={output}\nDMON_STACK_VALUE=from-file\n",
+                encoding="utf-8",
+            )
+            config = {
+                "tasks": {
+                    "service": {
+                        "cmd": [
+                            sys.executable,
+                            "-u",
+                            "-c",
+                            "import os, pathlib, time; "
+                            "pathlib.Path(os.environ['DMON_STACK_OUTPUT']).write_text("
+                            "os.environ['DMON_STACK_VALUE']); time.sleep(60)",
+                        ],
+                        "env_file": ".env",
+                    }
+                },
+                "stacks": {"dev": ["service"]},
+            }
+            (root / "dmon.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+
+            started = self.run_dmon(root, "stack", "up", "-d", "dev")
+            self.assert_dmon_success(root, started)
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline and not output.exists():
+                time.sleep(0.05)
+            self.assertTrue(output.exists())
+            self.assertEqual(output.read_text(encoding="utf-8"), "from-file")
+
+            metadata = (root / ".dmon" / "service.meta.json").read_text(
+                encoding="utf-8"
+            )
+            self.assertNotIn("from-file", metadata)
+            self.assertNotIn(str(root / ".env"), metadata)
+            stopped = self.run_dmon(root, "stack", "down", "dev")
+            self.assert_dmon_success(root, stopped)
+
     def test_foreground_stack_cli_attaches_output_and_cleans_up(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

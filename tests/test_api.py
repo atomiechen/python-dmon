@@ -90,6 +90,56 @@ class ApiTest(unittest.TestCase):
             with self.assertRaises(DmonConfigError):
                 Dmon(config=root / "missing.yaml").status("service")
 
+    def test_environment_file_is_config_relative_and_never_persisted(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "service.env").write_text(
+                "DMON_API_SECRET=from-file\n", encoding="utf-8"
+            )
+            config = root / "dmon.yaml"
+            config.write_text(
+                yaml.safe_dump(
+                    {
+                        "tasks": {
+                            "service": {
+                                "cmd": [
+                                    sys.executable,
+                                    "-c",
+                                    "import time; time.sleep(60)",
+                                ],
+                                "env_file": "service.env",
+                                "ready": {
+                                    "command": [
+                                        sys.executable,
+                                        "-c",
+                                        "import os; raise SystemExit("
+                                        "os.environ.get('DMON_API_SECRET') != 'from-file')",
+                                    ]
+                                },
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            client = Dmon(config=config)
+            previous = Path.cwd()
+            try:
+                self.assertTrue(client.start("service").ok)
+                self.assertTrue(client.wait("service", timeout=1)[0].ready)
+                metadata = (root / ".dmon" / "service.meta.json").read_text(
+                    encoding="utf-8"
+                )
+                self.assertNotIn("DMON_API_SECRET", metadata)
+                self.assertNotIn("from-file", metadata)
+                self.assertEqual(Path.cwd(), previous)
+            finally:
+                client.stop("service")
+
+            (root / "service.env").unlink()
+            with self.assertRaisesRegex(DmonConfigError, "environment file not found"):
+                client.start("service")
+
     def test_stack_inspection_reuses_public_snapshots(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

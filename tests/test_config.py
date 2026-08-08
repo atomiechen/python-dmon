@@ -54,6 +54,39 @@ class ConfigTest(unittest.TestCase):
                 config = validate_task({"cmd": ["app"], field: 2}, "app")
                 self.assertEqual(getattr(config, field), 2)
 
+    def test_environment_files_accept_one_path_or_an_ordered_list(self) -> None:
+        single = validate_task({"cmd": ["app"], "env_file": ".env"}, "app")
+        multiple = validate_task(
+            {"cmd": ["app"], "env_file": ["base.env", "local.env"]}, "app"
+        )
+
+        self.assertEqual(single.env_files, [".env"])
+        self.assertEqual(multiple.env_files, ["base.env", "local.env"])
+        for value in ("", [], ["ok.env", ""], [1], True):
+            with self.subTest(value=value), self.assertRaisesRegex(
+                TypeError, "env_file"
+            ):
+                validate_task({"cmd": ["app"], "env_file": value}, "app")
+
+    def test_yaml_merge_keys_can_reuse_task_configuration(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = self.write_config(
+                Path(temporary),
+                "defaults: &defaults\n"
+                "  env_file: .env\n"
+                "  cwd: services\n"
+                "tasks:\n"
+                "  api:\n"
+                "    <<: *defaults\n"
+                "    cmd: [python, api.py]\n",
+            )
+
+            names, configs, _ = get_task_config(["api"], str(path))
+
+            self.assertEqual(names, ["api"])
+            self.assertEqual(configs[0].env_files, [".env"])
+            self.assertEqual(configs[0].cwd, "services")
+
     def test_stack_orders_dependencies_before_dependents(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = self.write_config(

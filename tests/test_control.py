@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import redirect_stderr
 from io import StringIO
+import json
 import os
 from pathlib import Path
 import signal
@@ -22,6 +23,7 @@ from dmon.control import (
     start_single_result,
     status,
     stop_single,
+    task_environment,
     terminate_process_tree,
 )
 from dmon.types import DmonMeta, DmonTaskConfig
@@ -113,6 +115,108 @@ class ControlTest(unittest.TestCase):
                 self.assertNotIn("do-not-store", text)
             finally:
                 self.cleanup_config(config)
+
+    def test_environment_files_are_layered_without_mutating_the_parent(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            base = root / "base.env"
+            local = root / "local.env"
+            base.write_text(
+                "FILE_ONLY=base\nHOST_WINS=file\nBASE=from-file\n"
+                "EXPANDED=${BASE}/child\n",
+                encoding="utf-8",
+            )
+            local.write_text(
+                "FILE_ONLY=local\nLOCAL_ONLY=yes\nNESTED=${EXPANDED}/nested\n",
+                encoding="utf-8",
+            )
+            config = DmonTaskConfig(
+                task="layered",
+                env_files=[str(base), str(local)],
+                env={"EXPLICIT": "yes", "FILE_ONLY": "explicit"},
+            )
+            with patch.dict(
+                os.environ,
+                {"HOST_WINS": "host", "HOST_ONLY": "yes"},
+                clear=True,
+            ):
+                result = task_environment(config)
+                self.assertEqual(os.environ, {"HOST_WINS": "host", "HOST_ONLY": "yes"})
+
+            self.assertEqual(
+                result,
+                {
+                    "FILE_ONLY": "explicit",
+                    "HOST_WINS": "host",
+                    "BASE": "from-file",
+                    "EXPANDED": "from-file/child",
+                    "LOCAL_ONLY": "yes",
+                    "NESTED": "from-file/child/nested",
+                    "HOST_ONLY": "yes",
+                    "EXPLICIT": "yes",
+                },
+            )
+
+            config.override_env = True
+            local.write_text(
+                "FILE_ONLY=local\nLOCAL_ONLY=${HOST_ONLY:-fallback}\n",
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {"HOST_ONLY": "hidden"}, clear=True):
+                isolated = task_environment(config)
+            self.assertNotIn("HOST_ONLY", isolated)
+            self.assertEqual(isolated["FILE_ONLY"], "explicit")
+            self.assertEqual(isolated["LOCAL_ONLY"], "fallback")
+
+    def test_started_task_receives_environment_file_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "environment.txt"
+            env_file = root / "service.env"
+            env_file.write_text("DMON_CHILD_VALUE=from-file\n", encoding="utf-8")
+            config = self.make_config(
+                root,
+                "environment-child",
+                [
+                    sys.executable,
+                    "-c",
+                    "import os, pathlib; pathlib.Path(os.environ['DMON_OUTPUT'])"
+                    ".write_text(os.environ['DMON_CHILD_VALUE'])",
+                ],
+            )
+            config.env_files = [str(env_file)]
+            config.env = {"DMON_OUTPUT": str(output)}
+
+            with redirect_stderr(StringIO()):
+                self.assertEqual(start_single(config), 0)
+            wait_until(output.exists)
+
+            self.assertEqual(output.read_text(encoding="utf-8"), "from-file")
+            metadata = Path(config.meta_path).read_text(encoding="utf-8")
+            stored = json.loads(metadata)
+            self.assertNotIn("env", stored)
+            self.assertNotIn("env_files", stored)
+            self.assertNotIn("from-file", metadata)
+            self.assertNotIn(str(env_file), metadata)
+
+    def test_missing_environment_file_fails_before_reserving_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = self.make_config(
+                root,
+                "missing-env",
+                [sys.executable, "-c", "import time; time.sleep(60)"],
+            )
+            config.env_files = [str(root / "missing.env")]
+            output = StringIO()
+
+            with redirect_stderr(output):
+                result = start_single(config)
+
+            self.assertEqual(result, 1)
+            self.assertIn("environment file not found", output.getvalue())
+            self.assertNotIn("Traceback", output.getvalue())
+            self.assertFalse(Path(config.meta_path).exists())
 
     def test_metadata_write_failure_stops_the_started_process(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -248,6 +352,45 @@ class ControlTest(unittest.TestCase):
                 if process.poll() is None:
                     os.killpg(process.pid, signal.SIGKILL)
                     process.wait(timeout=2)
+
+    def test_exec_loads_config_relative_environment_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project = root / "project"
+            project.mkdir()
+            (project / ".env").write_text(
+                "DMON_EXEC_VALUE=from-file\n", encoding="utf-8"
+            )
+            config = project / "dmon.yaml"
+            config.write_text(
+                "tasks:\n"
+                "  foreground:\n"
+                f"    cmd: [{sys.executable!r}, -c, "
+                "\"import os; print(os.environ['DMON_EXEC_VALUE'])\"]\n"
+                "    env_file: .env\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "dmon",
+                    "exec",
+                    "-c",
+                    str(config),
+                    "foreground",
+                ],
+                cwd=root,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), "from-file")
 
     def test_status_fails_for_exited_task_and_stop_cleans_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

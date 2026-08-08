@@ -83,6 +83,8 @@ class DmonTaskConfig:
     """Working directory to run the command in"""
     env: Dict[str, str] = field(default_factory=dict)
     """Environment variables to set for the command"""
+    env_files: List[str] = field(default_factory=list)
+    """Dotenv files to load before applying explicit environment values"""
     override_env: bool = False
     """Whether to override the entire environment with the provided env"""
     log_path: str = ""
@@ -122,6 +124,7 @@ class DmonMeta(DmonTaskConfig):
         # process. Persisting them would turn routine process metadata into a
         # secret store.
         data.pop("env", None)
+        data.pop("env_files", None)
         dump_json(path, data, exclusive=exclusive)
 
     @staticmethod
