@@ -409,7 +409,9 @@ creation time, and log paths. An active foreground or detached stack also has
 task processes it owns. Metadata paths are reserved exclusively and subsequent
 updates replace the JSON atomically; a per-run ID isolates stop requests, while
 PID plus creation time prevents a recycled PID from being mistaken for the
-original process. Normal foreground cleanup removes its stack metadata.
+original process. Environment values are used only to launch and probe the task;
+they are never written to metadata. Normal foreground cleanup removes its stack
+metadata.
 
 `dmon stack down` normally asks the foreground or detached supervisor to stop
 tasks in reverse order.

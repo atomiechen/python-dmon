@@ -88,6 +88,19 @@ class DmonMetaTest(unittest.TestCase):
             self.assertEqual((loaded.task, loaded.pid), ("second", 42))
             self.assertEqual(list(path.parent.glob("*.tmp")), [])
 
+    def test_task_metadata_never_persists_environment_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "task.meta.json"
+            DmonMeta(task="private", env={"SECRET_TOKEN": "do-not-store"}).dump(path)
+
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertNotIn("env", data)
+            self.assertNotIn("do-not-store", path.read_text(encoding="utf-8"))
+            loaded = DmonMeta.load(path)
+            self.assertIsNotNone(loaded)
+            assert loaded is not None
+            self.assertEqual(loaded.env, {})
+
     def test_regular_dump_retries_a_transient_replace_permission_error(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "task.meta.json"

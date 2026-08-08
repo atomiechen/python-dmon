@@ -117,7 +117,12 @@ class DmonMeta(DmonTaskConfig):
     create_time_human: str = "N/A"
 
     def dump(self, path: PathType, *, exclusive: bool = False):
-        dump_json(path, asdict(self), exclusive=exclusive)
+        data = asdict(self)
+        # Configuration environment values are needed only while spawning the
+        # process. Persisting them would turn routine process metadata into a
+        # secret store.
+        data.pop("env", None)
+        dump_json(path, data, exclusive=exclusive)
 
     @staticmethod
     def load(path: PathType) -> Optional["DmonMeta"]:

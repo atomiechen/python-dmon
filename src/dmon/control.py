@@ -174,7 +174,6 @@ def start_single_result(cfg: DmonTaskConfig) -> StartResult:
         log_rotate=cfg.log_rotate,
         cmd=cfg.cmd,
         cwd=str(cwd),
-        env=cfg.env,
         override_env=cfg.override_env,
         shell=shell,
         popen_kwargs=kwargs,

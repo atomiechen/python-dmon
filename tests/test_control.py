@@ -94,6 +94,26 @@ class ControlTest(unittest.TestCase):
             finally:
                 self.cleanup_config(config)
 
+    def test_started_task_metadata_does_not_contain_configured_environment(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = self.make_config(
+                root,
+                "private",
+                [sys.executable, "-c", "import time; time.sleep(60)"],
+            )
+            config.env = {"SECRET_TOKEN": "do-not-store"}
+            try:
+                with redirect_stderr(StringIO()):
+                    self.assertEqual(start_single(config), 0)
+                text = Path(config.meta_path).read_text(encoding="utf-8")
+                self.assertNotIn("SECRET_TOKEN", text)
+                self.assertNotIn("do-not-store", text)
+            finally:
+                self.cleanup_config(config)
+
     def test_metadata_write_failure_stops_the_started_process(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

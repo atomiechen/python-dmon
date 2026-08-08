@@ -47,6 +47,8 @@ output so machine-readable output can be added without breaking terminal use.
   let concurrent starts silently manage the same task.
 - Metadata identifies a process by PID and creation time. A recycled PID is not
   the same process.
+- Process metadata must never persist configured environment values or values
+  loaded from environment files.
 - Stale metadata is cleaned when safe. Corrupt metadata is reported and
   preserved for diagnosis, not silently discarded.
 - Stop the complete process tree. Try graceful termination first, then force
