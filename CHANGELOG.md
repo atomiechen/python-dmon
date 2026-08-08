@@ -5,7 +5,7 @@ All notable changes to python-dmon will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 
-## [0.4.0] - Unreleased
+## [0.4.0] - 2026-08-08
 
 ### Added
 
@@ -19,10 +19,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Add `--format json` to finite task and stack status/list commands.
 - Add `dmon wait` and `Dmon.wait()` for configured task readiness, plus direct
   HTTP, TCP, and command waits with finite JSON results.
+- Add config-relative `env_file` loading with ordered layering, dotenv
+  expansion, explicit precedence, and support across task, stack, wait, and
+  Python API workflows.
 
 ### Fixed
 
 - Publish start reservations only after their JSON is complete, so concurrent starts never observe a partially written metadata file.
+- Retry transient Windows permission errors while atomically replacing metadata
+  that another process is reading.
+- Keep configured environment values and environment-file paths out of process
+  metadata and structured inspection output.
 
 
 ## [0.3.1] - 2026-08-07
