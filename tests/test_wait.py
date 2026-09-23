@@ -126,9 +126,33 @@ class WaitTest(unittest.TestCase):
                 self.assertTrue(client.start("api").ok)
                 result = client.wait("api")[0]
                 log = root / "logs/api.log"
+                diagnostics = [repr(result)]
+                if not result.ready:
+                    snapshot = client.status("api").snapshot
+                    diagnostics.append(repr(snapshot))
+                    try:
+                        parent = psutil.Process(snapshot.pid)
+                        for process in [parent, *parent.children(recursive=True)]:
+                            try:
+                                diagnostics.append(
+                                    repr(
+                                        (
+                                            process.pid,
+                                            process.create_time(),
+                                            process.net_connections(kind="tcp"),
+                                        )
+                                    )
+                                )
+                            except psutil.Error as error:
+                                diagnostics.append(repr(error))
+                        with socket.create_connection(("127.0.0.1", port), timeout=1):
+                            diagnostics.append("TCP endpoint is reachable")
+                    except (psutil.Error, OSError) as error:
+                        diagnostics.append(repr(error))
                 self.assertTrue(
                     result.ready,
-                    f"{result!r}; task log: "
+                    "\n".join(diagnostics)
+                    + "; task log: "
                     + (log.read_text(errors="replace") if log.exists() else "missing"),
                 )
             finally:
