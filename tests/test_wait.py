@@ -93,11 +93,12 @@ class WaitTest(unittest.TestCase):
                 port = listener.getsockname()[1]
             child_command = [
                 sys.executable,
-                "-m",
-                "http.server",
-                str(port),
-                "--bind",
-                "127.0.0.1",
+                "-c",
+                # HTTPServer performs hostname lookup after bind and before
+                # listen. This TCP ownership test must not depend on DNS.
+                "import socketserver; "
+                f"socketserver.TCPServer(('127.0.0.1', {port}), "
+                "socketserver.BaseRequestHandler).serve_forever()",
             ]
             command = [
                 sys.executable,
