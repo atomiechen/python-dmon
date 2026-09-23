@@ -8,9 +8,10 @@
 
 A lightweight, cross-platform daemon manager that runs any command — called a *task* — as a background process.
 It also supports logging and log rotation out of the box.
-**No external runtime required**.
+Requires Python 3.8+; no system daemon or container runtime is needed.
 
 Shipped as the CLI tool `dmon`.
+Created by [Atomie CHEN](https://github.com/atomiechen).
 It is a Python-based and more powerful successor to the [handy-backend shell scripts](https://github.com/atomiechen/handy-backend).
 
 
@@ -199,6 +200,13 @@ clean the tasks it started. Supervisor diagnostics are written to
 process tree; `dmon stack list` summarizes all recorded foreground and detached
 stacks. `dmon stack restart` applies to detached stacks: it performs a clean
 `down` followed by a detached `up` and preserves the stack's exit policy.
+
+In the unreleased candidate, a detached startup failure preserves the failing
+task and cause in both startup output and subsequent JSON status. The stack's
+`log_path` points to supervisor diagnostics; `stack logs` only shows task output
+and may be empty when no task launched. Correct the cause, then use `stack down`
+to clear the failed run before starting again. Environment-file details stay in
+the diagnostic log rather than persisted status.
 
 ### Wait for readiness
 

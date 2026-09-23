@@ -19,10 +19,13 @@ from .control import (
     ensure_meta_dir,
     get_unique_process,
     print_task_table,
+    refresh_descendants,
     start_single_result,
     task_snapshot,
     task_environment,
     terminate_process,
+    stop_owned_processes,
+    task_owns_listener,
 )
 from .constants import STACK_META_SUFFIX
 from .logs import StackLogFollower, start_stack_log_follower
@@ -43,6 +46,7 @@ from .types import (
 
 StackStateCallback = Callable[[str, Sequence[Tuple[DmonTaskConfig, DmonMeta]]], None]
 StopCheck = Callable[[], bool]
+FailureCallback = Callable[[str], None]
 
 
 def task_label(task: str) -> str:
@@ -80,6 +84,7 @@ def up(
     stop_requested: Optional[StopCheck] = None,
     abort_on_exit: bool = False,
     attach_logs: bool = True,
+    failure_callback: Optional[FailureCallback] = None,
 ) -> int:
     started: list[tuple[DmonTaskConfig, DmonMeta]] = []
     exit_code = 1
@@ -98,10 +103,22 @@ def up(
         raise KeyboardInterrupt
 
     previous_term = signal.signal(signal.SIGTERM, terminate)
+
+    def observe_starting() -> None:
+        changed = False
+        for _, owned_meta in started:
+            changed = refresh_descendants(owned_meta) or changed
+        if changed:
+            notify_state(state_callback, "starting", started)
+
     try:
         for config in configs:
             result = start_single_result(config)
             if result.exit_code:
+                if failure_callback is not None:
+                    failure_callback(
+                        f"Task '{config.task}' could not start: {result.error}"
+                    )
                 print_startup_failure(config.task)
                 break
             meta = result.meta
@@ -110,7 +127,13 @@ def up(
                 break
             started.append((config, meta))
             notify_state(state_callback, "starting", started)
-            if not wait_ready(config, meta, stop_requested=stop_requested):
+            if not wait_ready(
+                config,
+                meta,
+                stop_requested=stop_requested,
+                observed=observe_starting,
+                failure_callback=failure_callback,
+            ):
                 print_startup_failure(config.task)
                 break
         else:
@@ -142,7 +165,9 @@ def up(
                 notify_state(state_callback, "stopping", started)
             finally:
                 cleanup_code = cleanup(started)
-            notify_state(state_callback, "stopped", started)
+            notify_state(
+                state_callback, "cleanup-failed" if cleanup_code else "stopped", started
+            )
         finally:
             if log_follower is not None:
                 log_follower.stop()
@@ -188,6 +213,10 @@ def monitor(
             print("Stopping stack by request...", file=sys.stderr)
             return 0
         for index, (config, meta) in enumerate(started):
+            if refresh_descendants(meta):
+                notify_state(
+                    state_callback, "degraded" if exited else "running", started
+                )
             if not check_running(meta.pid, meta.create_time):
                 if index in exited:
                     continue
@@ -219,8 +248,8 @@ def monitor(
 def cleanup(started: Sequence[tuple[DmonTaskConfig, DmonMeta]]) -> int:
     failed = []
     for config, meta in reversed(started):
-        process = get_unique_process(meta.pid, meta.create_time)
-        if process is not None and terminate_process(process, timeout=5.0):
+        refresh_descendants(meta)
+        if stop_owned_processes(meta, timeout=5.0):
             failed.append(config.task)
             continue
 
@@ -260,20 +289,50 @@ def wait_ready(
     config: DmonTaskConfig,
     meta: DmonMeta,
     stop_requested: Optional[StopCheck] = None,
+    observed: Optional[Callable[[], None]] = None,
+    failure_callback: Optional[FailureCallback] = None,
 ) -> bool:
+    def process_running() -> bool:
+        if observed is not None:
+            observed()
+        else:
+            refresh_descendants(meta)
+        return check_running(meta.pid, meta.create_time)
+
     spec = ready_spec(config.ready) if config.ready else process_stabilization_spec()
+    try:
+        env = task_environment(config)
+    except (OSError, ValueError) as error:
+        print(
+            f"Task '{config.task}' readiness environment failed: {error}",
+            file=sys.stderr,
+        )
+        if failure_callback is not None:
+            failure_callback(
+                f"Task '{config.task}' readiness environment setup failed; "
+                "see startup diagnostics"
+            )
+        return False
     result = wait_for_readiness(
         config.task,
         spec,
         cwd=str(Path(config.cwd).resolve()),
-        env=task_environment(config),
-        process_running=lambda: check_running(meta.pid, meta.create_time),
+        env=env,
+        process_running=process_running,
         stop_requested=stop_requested,
+        listener_owned=(lambda: task_owns_listener(meta, spec.tcp_host, spec.tcp_port))
+        if spec.require_owned
+        else None,
     )
     if result.ready:
         if config.ready:
             print(task_message(config.task, " is ready.", "green"), file=sys.stderr)
         return True
+    if failure_callback is not None:
+        detail = f"Task '{config.task}' readiness failed ({result.reason})"
+        if result.reason in {"timeout", "listener-unverified"}:
+            detail += f" after {spec.timeout:g} seconds"
+        failure_callback(detail + f". Task log: {config.log_path}")
     if result.reason == "process-exited":
         print(
             task_message(config.task, " exited before becoming ready.", "red"),
@@ -284,6 +343,15 @@ def wait_ready(
             task_message(
                 config.task,
                 f" did not become ready within {spec.timeout:g} seconds.",
+                "red",
+            ),
+            file=sys.stderr,
+        )
+    elif result.reason == "listener-unverified":
+        print(
+            task_message(
+                config.task,
+                " readiness listener could not be verified as belonging to this task; no external process was adopted or stopped.",
                 "red",
             ),
             file=sys.stderr,
@@ -318,7 +386,12 @@ def same_stack_process(first: DmonStackMeta, second: DmonStackMeta) -> bool:
 
 def stack_tasks_running(meta: DmonStackMeta) -> bool:
     return any(
-        check_running(task.pid, task.create_time) for task in meta.tasks if task.pid > 0
+        check_running(task.pid, task.create_time)
+        or any(
+            check_running(child.pid, child.create_time) for child in task.descendants
+        )
+        for task in meta.tasks
+        if task.pid > 0
     )
 
 
@@ -356,6 +429,7 @@ def reserve_stack(
         pid=own_pid,
         create_time=psutil.Process(own_pid).create_time(),
         config_path=str(config_path.resolve()),
+        meta_path=str(meta_path.resolve()),
         log_path=str(log_path.resolve()),
     )
     try:
@@ -374,6 +448,7 @@ def update_stack_state(
     owner: DmonStackMeta,
     state: str,
     started: Sequence[tuple[DmonTaskConfig, DmonMeta]],
+    error: str = "",
 ) -> None:
     current = DmonStackMeta.load(meta_path)
     if (
@@ -383,6 +458,7 @@ def update_stack_state(
     ):
         raise RuntimeError(f"{owner.mode} stack ownership metadata was lost")
     current.state = state
+    current.error = error
     current.tasks = [DmonStackTask.from_meta(task) for _, task in started]
     current.dump(meta_path)
 
@@ -445,6 +521,12 @@ def start_foreground_stack(
             and current.run_id == meta.run_id
             and same_stack_process(current, meta)
         ):
+            if current.state == "cleanup-failed":
+                current.error = (
+                    "stack cleanup is incomplete; ownership metadata was preserved"
+                )
+                current.dump(meta_path)
+                return 1
             meta_path.unlink(missing_ok=True)
             stop_path.unlink(missing_ok=True)
     except (OSError, ValueError, TypeError) as error:
@@ -642,6 +724,7 @@ def run_detached_stack(meta_path: Path, run_id: str, poll_interval: float = 0.5)
         return 1
     assert meta is not None
 
+    failures: list[str] = []
     try:
         _, configs, config_path = get_stack_config(meta.stack, meta.config_path)
         fill_default_paths(configs)
@@ -651,7 +734,9 @@ def run_detached_stack(meta_path: Path, run_id: str, poll_interval: float = 0.5)
             state: str,
             started: Sequence[tuple[DmonTaskConfig, DmonMeta]],
         ) -> None:
-            update_stack_state(meta_path, meta, state, started)
+            update_stack_state(
+                meta_path, meta, state, started, failures[-1] if failures else ""
+            )
 
         result = up(
             configs,
@@ -660,6 +745,7 @@ def run_detached_stack(meta_path: Path, run_id: str, poll_interval: float = 0.5)
             stop_requested=lambda: stack_stop_requested(stop_path, meta.run_id),
             abort_on_exit=meta.abort_on_exit,
             attach_logs=False,
+            failure_callback=failures.append,
         )
     except Exception as error:
         try:
@@ -687,8 +773,13 @@ def run_detached_stack(meta_path: Path, run_id: str, poll_interval: float = 0.5)
                 meta_path.unlink(missing_ok=True)
                 stop_path.unlink(missing_ok=True)
             else:
+                cleanup_failed = current.state == "cleanup-failed"
                 current.state = "failed"
-                current.error = "stack supervision ended unexpectedly"
+                current.error = current.error or "stack supervision ended unexpectedly"
+                if cleanup_failed:
+                    current.error += (
+                        "; cleanup incomplete; ownership metadata preserved"
+                    )
                 current.dump(meta_path)
     except (OSError, ValueError, TypeError):
         return 1
@@ -772,6 +863,8 @@ def cleanup_stack_tasks(tasks: Sequence[DmonStackTask]) -> int:
                 pid=task.pid,
                 create_time=task.create_time,
                 meta_path=task.meta_path,
+                descendants=list(task.descendants),
+                popen_kwargs={"start_new_session": task.new_session},
             ),
         )
         for task in tasks
@@ -805,7 +898,11 @@ def stack_snapshot(meta: DmonStackMeta) -> StackSnapshot:
     if meta.state == "failed":
         status = "failed"
     elif not supervisor_running:
-        status = "orphaned" if running_tasks else "exited"
+        status = (
+            "orphaned"
+            if running_tasks or any(task.live_descendant_pids for task in tasks)
+            else "exited"
+        )
     elif meta.state == "running":
         status = "running" if running_tasks == len(meta.tasks) else "degraded"
     else:
@@ -881,6 +978,8 @@ def stack_task_metas(meta: DmonStackMeta) -> list[DmonMeta]:
             or abs(current.create_time - task.create_time) >= 1e-3
         ):
             current = None
+        if current is not None:
+            current.descendants = list(task.descendants)
         metas.append(
             current
             or DmonMeta(
@@ -888,6 +987,7 @@ def stack_task_metas(meta: DmonStackMeta) -> list[DmonMeta]:
                 pid=task.pid,
                 create_time=task.create_time,
                 meta_path=task.meta_path,
+                descendants=list(task.descendants),
             )
         )
     return metas

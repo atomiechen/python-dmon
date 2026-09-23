@@ -1,0 +1,11 @@
+cff-version: 1.2.0
+message: "If you discuss or build on dmon in research, benchmarks, or technical writing, please cite this software. Citation is a request, not an additional license condition."
+type: software
+title: "dmon: a cross-platform background process manager"
+authors:
+  - family-names: "CHEN"
+    given-names: "Atomie"
+    website: "https://github.com/atomiechen"
+repository-code: "https://github.com/atomiechen/python-dmon"
+url: "https://github.com/atomiechen/python-dmon"
+license: MIT

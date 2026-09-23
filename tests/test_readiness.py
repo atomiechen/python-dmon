@@ -59,6 +59,33 @@ class ReadinessTest(unittest.TestCase):
         self.assertEqual((stopped.reason, stopped.attempts), ("stopped", 0))
         probe.assert_not_called()
 
+    def test_successful_probe_cannot_hide_process_exit_or_cancellation(self):
+        spec = ReadySpec("tcp", timeout=1, interval=0.1)
+        with patch("dmon.readiness.probe", return_value=True):
+            running = iter([True, False])
+            result = wait_for_readiness(
+                "api", spec, cwd=".", env=None, process_running=lambda: next(running)
+            )
+            self.assertEqual(result.reason, "process-exited")
+            stopping = iter([False, True])
+            result = wait_for_readiness(
+                "api", spec, cwd=".", env=None, stop_requested=lambda: next(stopping)
+            )
+            self.assertEqual(result.reason, "stopped")
+
+    def test_unverified_listener_is_not_probed_and_reports_distinct_reason(self):
+        clock = Clock()
+        spec = ReadySpec("tcp", timeout=0.2, interval=0.1, require_owned=True)
+        with patch("dmon.readiness.time.monotonic", side_effect=clock.monotonic), patch(
+            "dmon.readiness.time.sleep", side_effect=clock.sleep
+        ), patch("dmon.readiness.probe") as probe:
+            result = wait_for_readiness(
+                "api", spec, cwd=".", env=None, listener_owned=lambda: False
+            )
+        self.assertFalse(result.ready)
+        self.assertEqual(result.reason, "listener-unverified")
+        probe.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

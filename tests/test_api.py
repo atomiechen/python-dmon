@@ -20,6 +20,26 @@ from dmon.types import DmonStackMeta, DmonStackTask
 
 
 class ApiTest(unittest.TestCase):
+    def test_start_failure_has_a_concrete_silent_diagnostic(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = root / "dmon.yaml"
+            config.write_text(
+                yaml.safe_dump(
+                    {
+                        "tasks": {"missing": ["dmon-no-such-executable"]},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            output = StringIO()
+            with redirect_stdout(output), redirect_stderr(output):
+                result = Dmon(config=config).start("missing")
+            self.assertFalse(result.ok)
+            self.assertIn("dmon-no-such-executable", result.results[0].error)
+            self.assertEqual(output.getvalue(), "")
+            self.assertFalse((root / ".dmon/missing.meta.json").exists())
+
     def make_project(self, root: Path) -> Path:
         config = root / "dmon.yaml"
         config.write_text(

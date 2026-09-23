@@ -280,7 +280,7 @@ class SupervisorTest(unittest.TestCase):
                 [sys.executable, "-c", "import time; time.sleep(60)"],
             )
             with patch("dmon.supervisor.wait_ready", return_value=True), patch(
-                "dmon.supervisor.time.sleep", side_effect=KeyboardInterrupt
+                "dmon.supervisor.monitor", side_effect=KeyboardInterrupt
             ), redirect_stderr(StringIO()):
                 self.assertEqual(up([running], poll_interval=0.05), 0)
             self.assert_not_running(running)
@@ -303,7 +303,7 @@ class SupervisorTest(unittest.TestCase):
             with patch(
                 "dmon.supervisor.wait_ready", side_effect=remove_metadata
             ), patch(
-                "dmon.supervisor.time.sleep", side_effect=KeyboardInterrupt
+                "dmon.supervisor.monitor", side_effect=KeyboardInterrupt
             ), redirect_stderr(StringIO()):
                 self.assertEqual(up([running], poll_interval=0.05), 0)
 
@@ -335,6 +335,32 @@ class SupervisorTest(unittest.TestCase):
             self.assertEqual(len(captured), 1)
             self.assert_process_stopped(captured[0])
             self.assert_not_running(running)
+
+    def test_environment_disappearing_before_readiness_is_sanitized_and_cleaned(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            config = self.make_config(
+                Path(temporary),
+                "api",
+                [sys.executable, "-c", "import time; time.sleep(60)"],
+            )
+            failures = []
+            output = StringIO()
+            # Task launch succeeds; a later environment read can fail if a
+            # generator replaces/removes an env file while startup is underway.
+            with patch(
+                "dmon.supervisor.task_environment",
+                side_effect=FileNotFoundError("private-environment.env"),
+            ), redirect_stderr(output):
+                result = up(
+                    [config], attach_logs=False, failure_callback=failures.append
+                )
+            self.assertEqual(result, 1)
+            self.assertEqual(len(failures), 1)
+            self.assertIn("Task 'api'", failures[0])
+            self.assertIn("environment setup failed", failures[0])
+            self.assertNotIn("private-environment.env", failures[0])
+            self.assertIn("private-environment.env", output.getvalue())
+            self.assert_not_running(config)
 
     def test_readiness_timeout_rolls_back_the_task(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -395,9 +421,11 @@ class SupervisorTest(unittest.TestCase):
                 return 0
 
             with patch(
-                "dmon.supervisor.get_unique_process",
+                "dmon.control.get_unique_process",
                 side_effect=lambda pid, _create_time: processes[pid],
-            ), patch("dmon.supervisor.terminate_process", side_effect=terminate):
+            ), patch("dmon.control.terminate_process", side_effect=terminate), patch(
+                "dmon.supervisor.refresh_descendants", return_value=False
+            ):
                 self.assertEqual(cleanup(started), 0)
 
             self.assertEqual(stopped, [processes[3], processes[2], processes[1]])

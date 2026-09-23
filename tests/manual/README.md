@@ -221,6 +221,12 @@ the foreground supervisor; detached supervision is tested separately below.
 
 ### Startup rollback
 
+Repeat startup failure with `-d` and inspect `stack status --format json`. The
+error must name the failing task and cause after rollback, with no traceback.
+Check a missing executable, `override_env: true` with no PATH, a readiness timeout,
+and an unverifiable listener. A failed environment file must be explained in the
+supervisor log without persisting its path or values in stack metadata.
+
 ```sh
 dmon stack up startup-failure; echo "exit=$?"
 dmon status stack-db; echo "exit=$?"
@@ -326,6 +332,32 @@ Replace `12345` with the displayed PID. Status should report an orphaned stack,
 and `down` must still remove every owned process and metadata file. The recovery
 must use persisted PID plus creation time; it must not stop an unrelated process
 that reused a PID or merely shares a task name.
+
+## Ownership and listener verification
+
+In an isolated lab copy, start a task or detached stack, then copy the entire
+lab (including `.dmon`) to another directory. Status, start and stop from the
+second directory must return `metadata-location-mismatch` without altering
+the original processes or either set of records. Stop from the original lab
+and verify normal cleanup. Repeat after a supervisor crash and with a moved
+directory; restore the moved lab to its original path before normal cleanup.
+Changing commands in the original config must not change which saved processes
+`stack down` stops. `tests/test_metadata_scope.py` covers these boundaries.
+
+Add `require_owned: true` to `stack-db.ready` and `stack-api.ready` in a disposable
+copy of this lab. Normal stack startup and configured waits must still pass.
+Run an unrelated HTTP server on the configured API port, then configure a
+managed sleeping task to probe that port with `require_owned: true`. Startup
+must fail with a listener verification diagnostic and clean only the sleeping
+task; the unrelated HTTP server must remain reachable. Repeat through
+`dmon wait <task> --format json` and check `reason: listener-unverified`.
+
+`tests/test_ownership.py` supplies a gated exiting-parent fixture: start it in a
+stack, wait until the child identity is persisted, kill the supervisor, and let
+the parent exit. A new `stack status --format json` must identify the orphaned
+stack and its live descendant. `stack down` must then clean that child. An
+unobserved residual POSIX process group must instead be preserved with a
+nonzero result. Do not broaden cleanup by matching executable names or ports.
 
 ## Presentation checklist
 

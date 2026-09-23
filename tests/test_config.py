@@ -15,6 +15,26 @@ from dmon.config import (
 
 
 class ConfigTest(unittest.TestCase):
+    def test_owned_readiness_requires_literal_local_network_endpoint(self):
+        valid = {"http": "http://127.0.0.1:8000/", "require_owned": True}
+        self.assertEqual(
+            validate_task({"cmd": ["api"], "ready": valid}, "api").ready[
+                "require_owned"
+            ],
+            True,
+        )
+        for ready in (
+            {"http": "https://example.com/", "require_owned": True},
+            {"http": "http://localhost/", "require_owned": True},
+            {"command": ["check"], "require_owned": True},
+            {"tcp": {"host": "0.0.0.0", "port": 80}, "require_owned": True},
+            {"http": "http://127.0.0.1/", "require_owned": "yes"},
+        ):
+            with self.subTest(ready=ready), self.assertRaisesRegex(
+                TypeError, "require_owned"
+            ):
+                validate_task({"cmd": ["api"], "ready": ready}, "api")
+
     def write_config(self, root: Path, text: str) -> Path:
         path = root / "dmon.yaml"
         path.write_text(text, encoding="utf-8")

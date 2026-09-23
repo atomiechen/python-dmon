@@ -158,7 +158,8 @@ class JsonCliTest(unittest.TestCase):
             meta = DmonStackMeta.load(meta_path)
             self.assertIsNotNone(meta)
             assert meta is not None
-            meta.tasks[0].create_time = -1
+            # A valid but mismatched identity is stale, not malformed metadata.
+            meta.tasks[0].create_time = 0
             meta.dump(meta_path)
             degraded = self.run_dmon(root, "stack", "status", "dev", "--format", "json")
             self.assertNotEqual(degraded.returncode, 0)

@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 from pathlib import Path
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 
 import psutil
 import yaml
+
+from dmon.control import check_running
 
 
 class DetachedStackTest(unittest.TestCase):
@@ -519,12 +523,110 @@ class DetachedStackTest(unittest.TestCase):
             try:
                 started = self.run_dmon(root, "stack", "up", "-d", "dev")
                 self.assertNotEqual(started.returncode, 0)
+                self.assertIn("Task 'missing' could not start", started.stderr)
+                self.assertIn("dmon-executable-that-does-not-exist", started.stderr)
                 self.assertFalse((root / ".dmon" / "service.meta.json").exists())
                 self.assertFalse((root / ".dmon" / "missing.meta.json").exists())
             finally:
                 if meta_path.exists():
                     stopped = self.run_dmon(root, "stack", "down", "dev")
                     self.assertEqual(stopped.returncode, 0, stopped.stderr)
+
+    def test_detached_failures_retain_actionable_cause_after_cleanup(self) -> None:
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.end_headers()
+
+            def log_message(self, *_args):
+                pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        command = [sys.executable, "-c", "import time; time.sleep(60)"]
+        cases = [
+            (
+                {"cmd": command, "env_file": "private-environment.env"},
+                "environment setup failed",
+            ),
+            (
+                {"cmd": ["dmon-no-such-executable"], "override_env": True},
+                "override_env=true",
+            ),
+            (
+                {
+                    "cmd": command,
+                    "ready": {
+                        "command": [sys.executable, "-c", "raise SystemExit(1)"],
+                        "timeout": 0.2,
+                    },
+                },
+                "timeout",
+            ),
+            (
+                {
+                    "cmd": command,
+                    "ready": {
+                        "http": f"http://127.0.0.1:{server.server_port}/",
+                        "require_owned": True,
+                        "timeout": 0.2,
+                    },
+                },
+                "listener-unverified",
+            ),
+            (
+                {
+                    "cmd": [sys.executable, "-c", "raise SystemExit(7)"],
+                    "ready": {
+                        "command": [sys.executable, "-c", "raise SystemExit(1)"],
+                        "timeout": 2,
+                    },
+                },
+                "process-exited",
+            ),
+        ]
+        try:
+            for task, reason in cases:
+                with self.subTest(reason=reason), tempfile.TemporaryDirectory() as temp:
+                    root = Path(temp)
+                    task["env"] = {"PRIVATE_VALUE": "must-not-persist"}
+                    (root / "dmon.yaml").write_text(
+                        yaml.safe_dump(
+                            {
+                                "tasks": {"api": task},
+                                "stacks": {"dev": ["api"]},
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+                    try:
+                        started = self.run_dmon(root, "stack", "up", "-d", "dev")
+                        self.assertEqual(started.returncode, 1, started.stderr)
+                        self.assertIn("Task 'api'", started.stderr)
+                        self.assertIn(reason, started.stderr)
+                        status = self.run_dmon(
+                            root, "stack", "status", "dev", "--format", "json"
+                        )
+                        self.assertEqual(status.returncode, 1, status.stderr)
+                        snapshot = json.loads(status.stdout)["stacks"][0]["snapshot"]
+                        self.assertEqual(snapshot["state"], "failed")
+                        self.assertIn(reason, snapshot["error"])
+                        self.assertNotIn("must-not-persist", status.stdout)
+                        self.assertNotIn("private-environment.env", status.stdout)
+                        self.assertNotIn("\x1b[", snapshot["error"])
+                        for owned in snapshot["tasks"]:
+                            self.assertFalse(
+                                check_running(owned["pid"], owned["create_time"])
+                            )
+                        self.assertFalse((root / ".dmon/api.meta.json").exists())
+                        self.assertTrue(thread.is_alive())
+                    finally:
+                        self.run_dmon(root, "stack", "down", "dev")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
     def test_down_can_cancel_detached_startup(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

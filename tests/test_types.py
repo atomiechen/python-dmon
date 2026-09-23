@@ -12,6 +12,20 @@ from dmon.types import DmonMeta, DmonStackMeta, DmonStackTask
 
 
 class DmonMetaTest(unittest.TestCase):
+    def test_malformed_task_and_descendant_metadata_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "task.json"
+            for value in (
+                [],
+                {"descendants": {}},
+                {"descendants": [{"pid": 0, "create_time": 1}]},
+            ):
+                path.write_text(json.dumps(value), encoding="utf-8")
+                with self.subTest(value=value), self.assertRaises(
+                    (ValueError, TypeError)
+                ):
+                    DmonMeta.load(path)
+
     def test_stack_metadata_round_trip_preserves_owned_processes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "dev.stack.json"
@@ -81,7 +95,7 @@ class DmonMetaTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "task.meta.json"
             DmonMeta(task="first").dump(path, exclusive=True)
-            DmonMeta(task="second", pid=42).dump(path)
+            DmonMeta(task="second", pid=42, create_time=42.0).dump(path)
             loaded = DmonMeta.load(path)
             self.assertIsNotNone(loaded)
             assert loaded is not None

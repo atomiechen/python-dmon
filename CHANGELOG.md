@@ -5,6 +5,39 @@ All notable changes to python-dmon will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 
+## [Unreleased]
+
+### Added
+
+- Add optional `ready.require_owned` for literal-loopback HTTP/TCP probes. Stack
+  startup and configured waits verify a task or descendant listener and report
+  `listener-unverified` when ownership cannot be confirmed.
+- Retain observed descendant process identities in stack records, allowing
+  cleanup after a parent exit followed by a supervisor crash. Structured task
+  snapshots expose verified `live_descendant_pids`.
+- Add a portable local-service setup and handoff skill under `skills/dmon`.
+  The skill is distributed separately from the CLI and documents preview builds.
+
+### Fixed
+
+- Preserve and reject runtime records with missing or invalid PID/creation-time
+  identities instead of reporting stale cleanup success or raising a traceback.
+
+- Keep the failing task and startup/readiness cause in detached stack status
+  after rollback, instead of replacing them with a generic supervisor error.
+  Report a missing inherited PATH when environment replacement prevents launch.
+- Return concrete task-start errors through the silent Python API.
+- Handle environment-file errors during readiness as startup failures, with
+  cleanup and detailed diagnostics kept out of persisted status.
+- Reject copied or moved task/stack metadata with a location diagnostic before
+  it can inspect or control the original run. Preserve the record and processes;
+  accept symlink aliases of the original location and legacy stack paths.
+- Preserve metadata and report incomplete cleanup for unverified residual POSIX
+  process-group members, instead of silently reporting success. Refuse to
+  overwrite stale task metadata while those residual processes remain.
+- Recheck task identity and cancellation after a successful readiness probe.
+- Preserve foreground stack ownership records when cleanup is incomplete.
+
 ## [0.4.0] - 2026-08-08
 
 ### Added

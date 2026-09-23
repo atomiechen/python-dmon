@@ -17,6 +17,7 @@ from .control import (
     stop_single,
     task_snapshot,
     task_environment,
+    task_owns_listener,
 )
 from .results import (
     ActionResult,
@@ -59,7 +60,7 @@ class Dmon:
                         ok=result.exit_code == 0,
                         exit_code=result.exit_code,
                         snapshot=snapshot,
-                        error="" if result.exit_code == 0 else "task did not start",
+                        error=result.error,
                     )
                 )
         return BatchResult("start", tuple(results))
@@ -208,6 +209,13 @@ class Dmon:
                         process_running=lambda meta=meta: check_running(
                             meta.pid, meta.create_time
                         ),
+                        listener_owned=(
+                            lambda: task_owns_listener(
+                                meta, spec.tcp_host, spec.tcp_port
+                            )
+                        )
+                        if spec.require_owned
+                        else None,
                     )
                 )
         return tuple(results)

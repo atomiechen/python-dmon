@@ -6,6 +6,7 @@ import subprocess
 import time
 from typing import Callable, Mapping, Optional
 from urllib.request import urlopen
+from urllib.parse import urlsplit
 
 from .results import CommandSnapshot, WaitResult
 
@@ -22,6 +23,7 @@ class ReadySpec:
     tcp_host: str = ""
     tcp_port: int = 0
     command: CommandSnapshot = ""
+    require_owned: bool = False
 
 
 def ready_spec(
@@ -37,11 +39,15 @@ def ready_spec(
         interval if interval is not None else ready.get("interval", 0.2)
     )
     if "http" in ready:
+        url = urlsplit(str(ready["http"]))
         return ReadySpec(
             "http",
             resolved_timeout,
             resolved_interval,
             http_url=str(ready["http"]),
+            tcp_host=url.hostname or "",
+            tcp_port=url.port or (443 if url.scheme == "https" else 80),
+            require_owned=bool(ready.get("require_owned")),
         )
     if "tcp" in ready:
         tcp = ready["tcp"]
@@ -52,6 +58,7 @@ def ready_spec(
             resolved_interval,
             tcp_host=str(tcp["host"]),
             tcp_port=int(tcp["port"]),
+            require_owned=bool(ready.get("require_owned")),
         )
     command = ready.get("command", "")
     if isinstance(command, list):
@@ -76,10 +83,12 @@ def wait_for_readiness(
     env: Optional[Mapping[str, str]],
     process_running: Optional[Check] = None,
     stop_requested: Optional[Check] = None,
+    listener_owned: Optional[Check] = None,
 ) -> WaitResult:
     started = time.monotonic()
     deadline = started + spec.timeout
     attempts = 0
+    ownership_verified = not spec.require_owned
     while True:
         if stop_requested is not None and stop_requested():
             return WaitResult(
@@ -99,17 +108,43 @@ def wait_for_readiness(
             return WaitResult(
                 target,
                 ready,
-                "ready" if ready else "timeout",
+                "ready"
+                if ready
+                else "timeout"
+                if ownership_verified
+                else "listener-unverified",
                 time.monotonic() - started,
                 attempts,
             )
         if spec.kind != "process":
             attempts += 1
             attempt_timeout = min(max(1.0, spec.interval), remaining)
-            if probe(spec, cwd=cwd, env=env, timeout=attempt_timeout):
-                return WaitResult(
-                    target, True, "ready", time.monotonic() - started, attempts
-                )
+            ownership_verified = not spec.require_owned or (
+                listener_owned is not None and listener_owned()
+            )
+            if ownership_verified and probe(
+                spec, cwd=cwd, env=env, timeout=attempt_timeout
+            ):
+                if process_running is not None and not process_running():
+                    return WaitResult(
+                        target,
+                        False,
+                        "process-exited",
+                        time.monotonic() - started,
+                        attempts,
+                    )
+                if stop_requested is not None and stop_requested():
+                    return WaitResult(
+                        target, False, "stopped", time.monotonic() - started, attempts
+                    )
+                if spec.require_owned and (
+                    listener_owned is None or not listener_owned()
+                ):
+                    ownership_verified = False
+                else:
+                    return WaitResult(
+                        target, True, "ready", time.monotonic() - started, attempts
+                    )
         time.sleep(min(spec.interval, max(0.0, deadline - time.monotonic())))
 
 

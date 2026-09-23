@@ -1,4 +1,5 @@
 import math
+import ipaddress
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple, Union, cast
@@ -216,7 +217,7 @@ def validate_task(task, name: str) -> DmonTaskConfig:
 def validate_ready(ready, name: str) -> Dict[str, object]:
     if not isinstance(ready, dict):
         raise TypeError(f"Task '{name}' 'ready' field must be a table")
-    allowed = {"http", "tcp", "command", "timeout", "interval"}
+    allowed = {"http", "tcp", "command", "timeout", "interval", "require_owned"}
     unknown = set(ready) - allowed
     if unknown:
         raise TypeError(
@@ -262,6 +263,26 @@ def validate_ready(ready, name: str) -> Dict[str, object]:
             raise TypeError(
                 f"Task '{name}' readiness 'tcp' value must contain a host string and valid port"
             )
+    if "require_owned" in ready:
+        if not isinstance(ready["require_owned"], bool):
+            raise TypeError(
+                f"Task '{name}' readiness 'require_owned' must be a boolean"
+            )
+        if ready["require_owned"]:
+            host = (
+                urlsplit(ready["http"]).hostname
+                if "http" in ready
+                else ready.get("tcp", {}).get("host", "")
+            )
+            try:
+                local = ipaddress.ip_address(host).is_loopback
+            except ValueError:
+                local = False
+            if not local:
+                raise TypeError(
+                    f"Task '{name}' readiness 'require_owned' needs an HTTP or TCP "
+                    "probe with a literal loopback IP address"
+                )
     for key, default in (("timeout", 30.0), ("interval", 0.2)):
         value = ready.get(key, default)
         if (

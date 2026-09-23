@@ -1,0 +1,4 @@
+interface:
+  display_name: "dmon"
+  short_description: "Manage local services across coding sessions"
+  default_prompt: "Use $dmon to assess this project’s local service workflow and set it up only if appropriate."

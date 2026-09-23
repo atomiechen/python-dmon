@@ -6,6 +6,7 @@ from pathlib import Path
 import shlex
 import shutil
 import signal
+import socket
 import sys
 import subprocess
 import time
@@ -19,7 +20,7 @@ from termcolor import colored
 
 from .constants import DEFAULT_META_DIR, META_SUFFIX, ON_WINDOWS
 from .results import CommandSnapshot, TaskSnapshot
-from .types import DmonTaskConfig, DmonMeta, PathType
+from .types import DmonTaskConfig, DmonMeta, PathType, ProcessIdentity
 from .utils import len_ansi, pad_ansi
 
 
@@ -49,6 +50,7 @@ def diagnostic_output(stream: TextIO) -> Iterator[None]:
 class StartResult:
     exit_code: int
     meta: Optional[DmonMeta] = None
+    error: str = ""
 
 
 def background_process_kwargs() -> dict:
@@ -117,7 +119,7 @@ def start_single_result(cfg: DmonTaskConfig) -> StartResult:
             ),
             file=sys.stderr,
         )
-        return StartResult(1)
+        return StartResult(1, error=f"cannot read metadata {meta_path}: {error}")
     if existing_meta and existing_meta.state == "starting":
         print(
             colored(
@@ -131,7 +133,7 @@ def start_single_result(cfg: DmonTaskConfig) -> StartResult:
             "If the earlier start was interrupted, run 'dmon stop' to remove its reservation.",
             file=sys.stderr,
         )
-        return StartResult(1)
+        return StartResult(1, error="task is already being started")
     if existing_meta and check_running(existing_meta.pid, existing_meta.create_time):
         print(
             f"{colored('Start failed: meta file already exists', color='red', attrs=['bold'])}",
@@ -142,8 +144,18 @@ def start_single_result(cfg: DmonTaskConfig) -> StartResult:
             "\nRun 'dmon status' / 'dmon list' to check, or 'dmon stop' to stop it.",
             file=sys.stderr,
         )
-        return StartResult(1)
+        return StartResult(1, error="task is already running")
     if existing_meta:
+        if any(
+            check_running(child.pid, child.create_time)
+            for child in existing_meta.descendants
+        ) or unverified_group_remains(existing_meta):
+            print(
+                f"Start failed: task '{cfg.task}' still has residual processes; "
+                "stop its owning stack or inspect its preserved metadata first.",
+                file=sys.stderr,
+            )
+            return StartResult(1, error="task still has residual processes")
         print(
             colored(
                 f"Removing stale metadata for exited task '{cfg.task}'.",
@@ -167,7 +179,8 @@ def start_single_result(cfg: DmonTaskConfig) -> StartResult:
             ),
             file=sys.stderr,
         )
-        return StartResult(1)
+        # Detailed environment diagnostics belong in the log, not persisted state.
+        return StartResult(1, error="environment setup failed; see startup diagnostics")
 
     shell = isinstance(cfg.cmd, str)
 
@@ -203,7 +216,7 @@ def start_single_result(cfg: DmonTaskConfig) -> StartResult:
             ),
             file=sys.stderr,
         )
-        return StartResult(1)
+        return StartResult(1, error="another dmon process is starting this task")
 
     try:
         if cfg.log_rotate:
@@ -271,15 +284,27 @@ def start_single_result(cfg: DmonTaskConfig) -> StartResult:
                 )
     except OSError as error:
         meta_path.unlink(missing_ok=True)
+        detail = str(error)
+        if (
+            isinstance(error, FileNotFoundError)
+            and cfg.override_env
+            and env is not None
+            and "PATH" not in env
+            and cwd.is_dir()
+        ):
+            detail += (
+                "; override_env=true removes the inherited environment, including PATH. "
+                "Use env without override_env for variable overrides, or supply PATH explicitly."
+            )
         print(
             colored(
-                f"Start failed for task '{cfg.task}': {error}",
+                f"Start failed for task '{cfg.task}': {detail}",
                 color="red",
                 attrs=["bold"],
             ),
             file=sys.stderr,
         )
-        return StartResult(1)
+        return StartResult(1, error=detail)
 
     meta.pid = proc.pid
     meta.state = "running"
@@ -313,7 +338,7 @@ def start_single_result(cfg: DmonTaskConfig) -> StartResult:
             ),
             file=sys.stderr,
         )
-        return StartResult(1)
+        return StartResult(1, error=f"cannot save metadata: {error}")
 
     print_status(meta)
     with warnings.catch_warnings():
@@ -397,6 +422,8 @@ def stop_single(
     try:
         proc = psutil.Process(pid)
     except (psutil.NoSuchProcess, ValueError):
+        if stop_owned_processes(meta, timeout):
+            return 1
         print(
             colored(
                 f"Process {pid} not found (already exited); removing stale meta file",
@@ -411,6 +438,8 @@ def stop_single(
 
     # check if it's the same process by comparing create_time
     if not check_same_process(proc, meta.create_time):
+        if stop_owned_processes(meta, timeout):
+            return 1
         print(
             colored(
                 f"Warning: PID {pid} exists but create_time does not match (maybe reused by another process); removing stale meta file",
@@ -423,6 +452,8 @@ def stop_single(
         meta_path.unlink(missing_ok=True)
         return 0
     if not process_is_alive(proc):
+        if stop_owned_processes(meta, timeout):
+            return 1
         print(
             colored(
                 f"Process {pid} already exited; removing stale meta file",
@@ -435,11 +466,117 @@ def stop_single(
         meta_path.unlink(missing_ok=True)
         return 0
 
-    ret = terminate_process(proc, timeout)
+    refresh_descendants(meta)
+    ret = stop_owned_processes(meta, timeout)
     print_status(meta)
     if ret == 0:
         meta_path.unlink(missing_ok=True)
     return ret
+
+
+def owned_identities(meta: DmonMeta) -> List[ProcessIdentity]:
+    identities = list(meta.descendants)
+    if meta.pid > 0 and meta.create_time >= 0:
+        identities.insert(0, ProcessIdentity(meta.pid, meta.create_time))
+    return identities
+
+
+def refresh_descendants(meta: DmonMeta) -> bool:
+    """Retain observed live identities, even after their parent has exited.
+
+    This is ancestry evidence within the user's trust domain, not a security
+    boundary. Children that escape before observation cannot be recovered by
+    guessing from names, ports or process group numbers.
+    """
+    observed = set()
+    for identity in owned_identities(meta):
+        process = get_unique_process(identity.pid, identity.create_time)
+        if process is None:
+            continue
+        if identity.pid != meta.pid:
+            observed.add(identity)
+        try:
+            children = process.children(recursive=True)
+            if not check_same_process(process, identity.create_time):
+                continue
+            for child in children:
+                if process_is_alive(child):
+                    observed.add(ProcessIdentity(child.pid, child.create_time()))
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    descendants = sorted(observed, key=lambda item: (item.pid, item.create_time))
+    changed = descendants != meta.descendants
+    meta.descendants = descendants
+    return changed
+
+
+def task_owns_listener(meta: DmonMeta, host: str, port: int) -> bool:
+    """Positive evidence only; unavailable process sockets never imply ownership.
+
+    Callers validate a literal loopback endpoint. Never inspect or signal a
+    foreign listener, and never treat a successful network probe as identity.
+    """
+    root = get_unique_process(meta.pid, meta.create_time)
+    if root is None:
+        return False
+    try:
+        processes = [root, *root.children(recursive=True)]
+        for process in processes:
+            try:
+                birth = process.create_time()
+                for connection in process.net_connections(kind="tcp"):
+                    if (
+                        connection.status == psutil.CONN_LISTEN
+                        and connection.laddr.port == port
+                        and (
+                            connection.laddr.ip == host
+                            or connection.laddr.ip
+                            == (
+                                "::"
+                                if connection.family == socket.AF_INET6
+                                else "0.0.0.0"
+                            )
+                            and (
+                                (":" in host) == (connection.family == socket.AF_INET6)
+                            )
+                        )
+                        and check_running(process.pid, birth)
+                        and check_running(meta.pid, meta.create_time)
+                    ):
+                        return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        pass
+    return False
+
+
+def stop_owned_processes(meta: DmonMeta, timeout: float) -> int:
+    """Stop verified identities; preserve evidence when cleanup is uncertain."""
+    failed = False
+    for identity in owned_identities(meta):
+        process = get_unique_process(identity.pid, identity.create_time)
+        if process is not None and terminate_process(process, timeout):
+            failed = True
+    if unverified_group_remains(meta):
+        print(
+            f"Task '{meta.task}' exited but its former process group still has "
+            "unverified members; refusing to signal them. Metadata was preserved.",
+            file=sys.stderr,
+        )
+        failed = True
+    return int(failed)
+
+
+def unverified_group_remains(meta: DmonMeta) -> bool:
+    if ON_WINDOWS or meta.pid <= 0 or not meta.popen_kwargs.get("start_new_session"):
+        return False
+    try:
+        if not check_same_process(psutil.Process(meta.pid), meta.create_time):
+            return False  # A recycled group leader is not ours.
+    except (psutil.NoSuchProcess, ValueError):
+        pass
+    return process_group_exists(meta.pid)
 
 
 def terminate_process(proc: psutil.Process, timeout: float) -> int:
@@ -666,6 +803,11 @@ def task_snapshot(meta: DmonMeta) -> TaskSnapshot:
         log_backup_count=meta.log_backup_count,
         rotate_log_max_size=meta.rotate_log_max_size,
         rotate_log_backup_count=meta.rotate_log_backup_count,
+        live_descendant_pids=tuple(
+            identity.pid
+            for identity in meta.descendants
+            if check_running(identity.pid, identity.create_time)
+        ),
     )
 
 

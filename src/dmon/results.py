@@ -24,6 +24,7 @@ class TaskSnapshot:
     log_backup_count: Optional[int]
     rotate_log_max_size: float
     rotate_log_backup_count: Optional[int]
+    live_descendant_pids: Tuple[int, ...] = ()
 
     @property
     def running(self) -> bool:
