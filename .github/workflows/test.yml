@@ -24,6 +24,8 @@ jobs:
           - os: macos-latest
             python: '3.13'
           - os: windows-latest
+            python: '3.8'
+          - os: windows-latest
             python: '3.13'
     steps:
       - uses: actions/checkout@v7.0.1
