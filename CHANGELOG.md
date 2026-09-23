@@ -20,6 +20,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Anchor new task and stack metadata/log paths before resolution on Windows
+  Python 3.8, so missing parent directories cannot produce relative ownership
+  records that later reject their own location.
+- Preserve shell command quoting when launching the log-rotation runner,
+  including quoted executable paths and arguments containing spaces.
+- Retry transient Windows metadata read permission errors for a bounded period;
+  persistent errors and invalid ownership records remain failures.
 - Preserve and reject runtime records with missing or invalid PID/creation-time
   identities instead of reporting stale cleanup success or raising a traceback.
 

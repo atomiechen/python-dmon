@@ -1,5 +1,8 @@
 # Validate a Git checkout on Windows
 
+The [2026-09-23 native validation findings](windows-native-results.md) record
+the pinned baseline, reproduced defects, and the console method and its limits.
+
 Use native Windows Python and PowerShell/cmd. WSL or Linux containers do not
 validate Windows process and console behavior. Read `AGENTS.md`, `README.md`,
 `CONTRIBUTING.md`, `docs/ownership.md`, and `tests/manual/README.md` first.

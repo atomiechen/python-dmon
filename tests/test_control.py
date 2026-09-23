@@ -43,6 +43,73 @@ def wait_until(predicate, timeout: float = 5.0) -> None:
 
 
 class ControlTest(unittest.TestCase):
+    def test_relative_new_paths_are_persisted_as_absolute_locations(self) -> None:
+        original_cwd = Path.cwd()
+        for rotate in (False, True):
+            with self.subTest(
+                rotate=rotate
+            ), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                config = self.make_config(
+                    root,
+                    "relative",
+                    [sys.executable, "-c", "import time; time.sleep(60)"],
+                )
+                config.meta_path = "new-state/nested/task.json"
+                config.log_path = "new-logs/task.log"
+                config.rotate_log_path = "new-logs/runner.log"
+                config.log_rotate = rotate
+                try:
+                    os.chdir(root)
+                    with redirect_stderr(StringIO()):
+                        self.assertEqual(start_single(config), 0)
+                    path = root / config.meta_path
+                    record = json.loads(path.read_text(encoding="utf-8"))
+                    self.assertEqual(record["meta_path"], str(path.resolve()))
+                    self.assertEqual(
+                        record["log_path"], str((root / config.log_path).resolve())
+                    )
+                    self.assertIsNotNone(DmonMeta.load(path))
+                    with redirect_stderr(StringIO()):
+                        self.assertEqual(stop_single(path), 0)
+                    self.assertFalse(path.exists())
+                    self.assertFalse(
+                        check_running(record["pid"], record["create_time"])
+                    )
+                finally:
+                    # Keep cleanup independent of the path regression under test.
+                    path = root / config.meta_path
+                    if path.exists():
+                        record = json.loads(path.read_text(encoding="utf-8"))
+                        if check_running(record["pid"], record["create_time"]):
+                            terminate_process_tree(psutil.Process(record["pid"]), 1)
+                    os.chdir(original_cwd)
+
+    def test_rotating_shell_command_preserves_quotes_and_metacharacters(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            script = root / "quoted command.py"
+            script.write_text(
+                "import json, sys; print(json.dumps(sys.argv[1:]), flush=True)\n",
+                encoding="utf-8",
+            )
+            config = self.make_config(root, "quoted", [])
+            config.cmd = f'"{sys.executable}" "{script}" "two words" "literal&value"'
+            config.log_rotate = True
+            config.rotate_log_path = str(root / "logs" / "runner.log")
+            try:
+                with redirect_stderr(StringIO()):
+                    self.assertEqual(start_single(config), 0)
+                meta = DmonMeta.load(config.meta_path)
+                self.assertIsNotNone(meta)
+                wait_until(lambda: not check_running(meta.pid, meta.create_time))
+                self.assertEqual(
+                    Path(config.log_path).read_text(encoding="utf-8").strip(),
+                    json.dumps(["two words", "literal&value"]),
+                )
+            finally:
+                self.cleanup_config(config)
+
     def make_config(self, root: Path, task: str, command: list[str]) -> DmonTaskConfig:
         return DmonTaskConfig(
             task=task,

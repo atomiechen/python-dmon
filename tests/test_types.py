@@ -12,6 +12,80 @@ from dmon.types import DmonMeta, DmonStackMeta, DmonStackTask
 
 
 class DmonMetaTest(unittest.TestCase):
+    def test_load_retries_transient_windows_permission_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "record.json"
+            for model in (DmonMeta, DmonStackMeta):
+                with self.subTest(model=model):
+                    names = {"stack": "dev"} if model is DmonStackMeta else {}
+                    expected = model(
+                        **names, pid=42, create_time=42.0, meta_path=str(path)
+                    )
+                    expected.dump(path)
+                    original_open = Path.open
+                    attempts = 0
+
+                    def transient_open(target, *args, **kwargs):
+                        nonlocal attempts
+                        attempts += 1
+                        if attempts < 3:
+                            raise PermissionError("temporarily in use")
+                        return original_open(target, *args, **kwargs)
+
+                    with patch("dmon.types.ON_WINDOWS", True), patch.object(
+                        Path, "open", transient_open
+                    ), patch("dmon.types.time.sleep"):
+                        self.assertEqual(model.load(path), expected)
+                    self.assertEqual(attempts, 3)
+
+    def test_load_permission_retry_is_bounded_and_preserves_the_record(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "record.json"
+            for model in (DmonMeta, DmonStackMeta):
+                with self.subTest(model=model):
+                    names = {"stack": "dev"} if model is DmonStackMeta else {}
+                    model(**names, pid=42, create_time=42.0).dump(path)
+                    before = path.read_bytes()
+                    with patch("dmon.types.ON_WINDOWS", True), patch.object(
+                        Path, "open", side_effect=PermissionError("denied")
+                    ), patch("dmon.types.time.monotonic", side_effect=[0, 0, 1]), patch(
+                        "dmon.types.time.sleep"
+                    ):
+                        with self.assertRaises(PermissionError):
+                            model.load(path)
+                    self.assertEqual(path.read_bytes(), before)
+
+    def test_load_retry_still_rejects_wrong_metadata_location(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "record.json"
+            for model in (DmonMeta, DmonStackMeta):
+                with self.subTest(model=model):
+                    names = {"stack": "dev"} if model is DmonStackMeta else {}
+                    model(
+                        **names,
+                        pid=42,
+                        create_time=42.0,
+                        meta_path=str(path.parent / "other.json"),
+                    ).dump(path)
+                    original_open = Path.open
+                    attempts = 0
+
+                    def transient_open(target, *args, **kwargs):
+                        nonlocal attempts
+                        attempts += 1
+                        if attempts == 1:
+                            raise PermissionError("temporarily in use")
+                        return original_open(target, *args, **kwargs)
+
+                    with patch("dmon.types.ON_WINDOWS", True), patch.object(
+                        Path, "open", transient_open
+                    ), patch("dmon.types.time.sleep"):
+                        with self.assertRaisesRegex(
+                            ValueError, "metadata-location-mismatch"
+                        ):
+                            model.load(path)
+                    self.assertEqual(attempts, 2)
+
     def test_malformed_task_and_descendant_metadata_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "task.json"

@@ -9,7 +9,7 @@ import tempfile
 import time
 from typing import Dict, List, Optional, Union
 
-from .constants import DEFAULT_META_DIR, STACK_META_SUFFIX
+from .constants import DEFAULT_META_DIR, ON_WINDOWS, STACK_META_SUFFIX
 
 
 if sys.version_info >= (3, 9):
@@ -91,6 +91,20 @@ def replace_file(source: Path, target: Path, timeout: float = 0.5) -> None:
             time.sleep(0.01)
 
 
+def read_json(path: Path, timeout: float = 0.5):
+    # Windows can briefly deny opening a record during atomic replacement.
+    # Retry only sharing/access errors, never invalid content or ownership.
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            with path.open("r", encoding="utf-8") as stream:
+                return json.load(stream)
+        except PermissionError:
+            if not ON_WINDOWS or time.monotonic() >= deadline:
+                raise
+            time.sleep(0.01)
+
+
 @dataclass
 class DmonTaskConfig:
     task: str = ""
@@ -150,14 +164,13 @@ class DmonMeta(DmonTaskConfig):
     def load(path: PathType) -> Optional["DmonMeta"]:
         p = Path(path)
         if p.exists():
-            with p.open("r", encoding="utf-8") as f:
-                data = json.load(f)
-                if not isinstance(data, dict):
-                    raise TypeError("task metadata must be a JSON object")
-                verify_metadata_path(data.get("meta_path", ""), p)
-                data["descendants"] = load_identities(data.get("descendants", []))
-                verify_saved_identity(data, allow_reservation=True)
-                return DmonMeta(**data)
+            data = read_json(p)
+            if not isinstance(data, dict):
+                raise TypeError("task metadata must be a JSON object")
+            verify_metadata_path(data.get("meta_path", ""), p)
+            data["descendants"] = load_identities(data.get("descendants", []))
+            verify_saved_identity(data, allow_reservation=True)
+            return DmonMeta(**data)
         return None
 
 
@@ -249,8 +262,7 @@ class DmonStackMeta:
         target = Path(path)
         if not target.exists():
             return None
-        with target.open("r", encoding="utf-8") as stream:
-            data = json.load(stream)
+        data = read_json(target)
         if not isinstance(data, dict):
             raise TypeError("stack metadata must be a JSON object")
         recorded = data.get("meta_path", "")

@@ -3,7 +3,6 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 import os
 from pathlib import Path
-import shlex
 import shutil
 import signal
 import socket
@@ -104,8 +103,10 @@ def start_single(cfg: DmonTaskConfig) -> int:
 
 
 def start_single_result(cfg: DmonTaskConfig) -> StartResult:
-    meta_path = Path(cfg.meta_path).resolve()
-    log_path = Path(cfg.log_path).resolve()
+    # Python 3.8 on Windows may leave resolve() relative if a parent is missing.
+    # Anchor before resolving so newly created records have durable locations.
+    meta_path = Path(cfg.meta_path).absolute().resolve()
+    log_path = Path(cfg.log_path).absolute().resolve()
     cwd = Path(cfg.cwd).resolve()
 
     try:
@@ -220,7 +221,7 @@ def start_single_result(cfg: DmonTaskConfig) -> StartResult:
 
     try:
         if cfg.log_rotate:
-            rotate_log_path = Path(cfg.rotate_log_path).resolve()
+            rotate_log_path = Path(cfg.rotate_log_path).absolute().resolve()
 
             meta.rotate_log_path = str(rotate_log_path)
             meta.log_max_size = cfg.log_max_size
@@ -232,8 +233,9 @@ def start_single_result(cfg: DmonTaskConfig) -> StartResult:
 
             # use runner to start user process and handle log rotation
             if isinstance(command, str):
-                # when cmd is str, we need to split it into list for subprocess
-                cmd = shlex.split(command)
+                # Transport shell text as one argument. Splitting and joining
+                # would discard quotes, escapes, and significant whitespace.
+                cmd = [command]
             else:
                 cmd = command
             args = [

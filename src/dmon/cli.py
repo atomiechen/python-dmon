@@ -557,7 +557,9 @@ def main():
             meta_paths.extend([META_PATH_TEMPLATE.format(task=task) for task in tasks])
 
         # Remove duplicates
-        unique_meta_paths = sorted(set(Path(p).resolve() for p in meta_paths))
+        unique_meta_paths = sorted(
+            set(Path(p).absolute().resolve() for p in meta_paths)
+        )
 
         if args.command == "stop":
             sp.exit(stop(unique_meta_paths))

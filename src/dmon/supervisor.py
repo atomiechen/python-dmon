@@ -429,8 +429,8 @@ def reserve_stack(
         pid=own_pid,
         create_time=psutil.Process(own_pid).create_time(),
         config_path=str(config_path.resolve()),
-        meta_path=str(meta_path.resolve()),
-        log_path=str(log_path.resolve()),
+        meta_path=str(meta_path.absolute().resolve()),
+        log_path=str(log_path.absolute().resolve()),
     )
     try:
         meta.dump(meta_path, exclusive=True)
@@ -472,7 +472,7 @@ def start_foreground_stack(
     abort_on_exit: bool = False,
     poll_interval: float = 0.2,
 ) -> int:
-    meta_path = meta_path.resolve()
+    meta_path = meta_path.absolute().resolve()
     stop_path = stack_stop_path(meta_path)
     meta = reserve_stack(
         stack,
@@ -544,8 +544,8 @@ def start_detached_stack(
     abort_on_exit: bool = False,
     poll_interval: float = 0.05,
 ) -> int:
-    meta_path = meta_path.resolve()
-    log_path = log_path.resolve()
+    meta_path = meta_path.absolute().resolve()
+    log_path = log_path.absolute().resolve()
     stop_path = stack_stop_path(meta_path)
     ensure_log_dir(log_path)
     meta = reserve_stack(
