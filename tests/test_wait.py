@@ -124,7 +124,13 @@ class WaitTest(unittest.TestCase):
             client = Dmon(root / "dmon.yaml")
             try:
                 self.assertTrue(client.start("api").ok)
-                self.assertTrue(client.wait("api")[0].ready)
+                result = client.wait("api")[0]
+                log = root / "logs/api.log"
+                self.assertTrue(
+                    result.ready,
+                    f"{result!r}; task log: "
+                    + (log.read_text(errors="replace") if log.exists() else "missing"),
+                )
             finally:
                 client.stop("api")
 

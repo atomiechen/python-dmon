@@ -27,6 +27,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   after rollback, instead of replacing them with a generic supervisor error.
   Report a missing inherited PATH when environment replacement prevents launch.
 - Return concrete task-start errors through the silent Python API.
+- Identify the executable when Windows launch errors omit its filename, without
+  including command arguments in the added diagnostic.
 - Handle environment-file errors during readiness as startup failures, with
   cleanup and detailed diagnostics kept out of persisted status.
 - Reject copied or moved task/stack metadata with a location diagnostic before

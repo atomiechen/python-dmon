@@ -96,6 +96,23 @@ class ControlTest(unittest.TestCase):
             finally:
                 self.cleanup_config(config)
 
+    def test_launch_error_without_filename_identifies_executable_not_arguments(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            config = self.make_config(
+                Path(temporary), "missing", ["missing-program", "private-argument"]
+            )
+            output = StringIO()
+            # Windows CreateProcess errors commonly omit the filename.
+            with patch(
+                "dmon.control.subprocess.Popen",
+                side_effect=FileNotFoundError(2, "The system cannot find the file"),
+            ), redirect_stderr(output):
+                result = start_single_result(config)
+            self.assertEqual(result.exit_code, 1)
+            self.assertIn("missing-program", result.error)
+            self.assertNotIn("private-argument", result.error)
+            self.assertFalse(Path(config.meta_path).exists())
+
     def test_started_task_metadata_does_not_contain_configured_environment(
         self,
     ) -> None:

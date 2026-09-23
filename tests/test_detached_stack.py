@@ -42,7 +42,9 @@ class DetachedStackTest(unittest.TestCase):
         while time.monotonic() < deadline:
             try:
                 data = json.loads(meta_path.read_text(encoding="utf-8"))
-            except (FileNotFoundError, json.JSONDecodeError):
+            except (FileNotFoundError, PermissionError, json.JSONDecodeError):
+                # A Windows replace can briefly deny a concurrent reader.
+                # The existing deadline still fails a permanently unreadable record.
                 time.sleep(0.05)
                 continue
             if data.get("state") == state:

@@ -285,6 +285,10 @@ def start_single_result(cfg: DmonTaskConfig) -> StartResult:
     except OSError as error:
         meta_path.unlink(missing_ok=True)
         detail = str(error)
+        if not error.filename and isinstance(cfg.cmd, list):
+            # CreateProcess may omit the filename. Keep the executable useful
+            # for diagnostics without copying potentially sensitive arguments.
+            detail = f"command {cfg.cmd[0]!r}: {detail}"
         if (
             isinstance(error, FileNotFoundError)
             and cfg.override_env
