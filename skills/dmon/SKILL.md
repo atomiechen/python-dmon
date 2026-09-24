@@ -36,8 +36,10 @@ uv tool run --from /absolute/path/to/python_dmon-VERSION-py3-none-any.whl dmon -
 ```
 
 Replace `dmon` in the examples below with that prefix. Do not silently fall back
-to a different installed version. Internal candidates use a development version
-and source identifier; verify the supplied build record and wheel checksum.
+to a different installed version. Candidate version strings alone may match an
+older release; verify the supplied Git commit or build record and wheel checksum.
+For a wheel, keep it at a unique checksum-named path so cached same-version builds
+are not confused.
 The preview's `require_owned` and recovery behavior are not in that public release.
 
 For a published release, use the project's chosen isolated installation method

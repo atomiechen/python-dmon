@@ -69,6 +69,10 @@ To get the latest features, install from source:
 pip install git+https://github.com/atomiechen/python-dmon.git
 ```
 
+For the unreleased ownership and repair workflow, use the
+[pinned agent preview and recovery demo](docs/agent-setup.md). Its installation
+source is separate from the published package above.
+
 ## Getting Started
 
 ### Prepare Configuration
