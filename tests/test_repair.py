@@ -413,10 +413,14 @@ class RepairTest(unittest.TestCase):
             port = probe.getsockname()[1]
         program = self.root / "server.py"
         program.write_text(
-            "import pathlib,time,http.server\n"
+            "import pathlib,time,http.server,socketserver\n"
+            # HTTPServer.server_bind calls getfqdn before listen; reverse DNS
+            # is unrelated to this loopback ownership test and can stall CI.
+            "class Server(socketserver.TCPServer):\n"
+            " allow_reuse_address = True\n"
             "print('fixture imported', flush=True)\n"
             "if pathlib.Path('serve').exists():\n"
-            f" server = http.server.HTTPServer(('127.0.0.1',{port}),http.server.SimpleHTTPRequestHandler)\n"
+            f" server = Server(('127.0.0.1',{port}),http.server.SimpleHTTPRequestHandler)\n"
             " print('fixture listening', flush=True)\n"
             " server.serve_forever()\n"
             "else: time.sleep(120)\n"
