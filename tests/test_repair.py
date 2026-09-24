@@ -63,7 +63,13 @@ class RepairTest(unittest.TestCase):
             )
         else:
             result = self.run_cli("stack", "up", "-d", "dev")
-            self.assertEqual(result.returncode, 0, result.stderr)
+            if result.returncode:
+                # Preserve startup evidence in CI before tearDown removes it.
+                logs = "\n".join(
+                    f"{path.name}:\n{path.read_text(errors='replace')}"
+                    for path in sorted((self.root / "logs").glob("*.log"))
+                )
+                self.fail(result.stderr + "\n" + logs)
         meta = self.wait_state("running")
         self.identities.extend((m["pid"], m["create_time"]) for m in meta["tasks"])
         return meta
@@ -408,8 +414,11 @@ class RepairTest(unittest.TestCase):
         program = self.root / "server.py"
         program.write_text(
             "import pathlib,time,http.server\n"
+            "print('fixture imported', flush=True)\n"
             "if pathlib.Path('serve').exists():\n"
-            f" http.server.HTTPServer(('127.0.0.1',{port}),http.server.SimpleHTTPRequestHandler).serve_forever()\n"
+            f" server = http.server.HTTPServer(('127.0.0.1',{port}),http.server.SimpleHTTPRequestHandler)\n"
+            " print('fixture listening', flush=True)\n"
+            " server.serve_forever()\n"
             "else: time.sleep(120)\n"
         )
         (self.root / "serve").touch()

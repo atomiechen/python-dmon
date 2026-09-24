@@ -271,17 +271,25 @@ class ControlTest(unittest.TestCase):
             config.env_files = [str(env_file)]
             config.env = {"DMON_OUTPUT": str(output)}
 
-            with redirect_stderr(StringIO()):
-                self.assertEqual(start_single(config), 0)
-            wait_until(output.exists)
+            try:
+                with redirect_stderr(StringIO()):
+                    self.assertEqual(start_single(config), 0)
+                wait_until(output.exists)
 
-            self.assertEqual(output.read_text(encoding="utf-8"), "from-file")
-            metadata = Path(config.meta_path).read_text(encoding="utf-8")
-            stored = json.loads(metadata)
-            self.assertNotIn("env", stored)
-            self.assertNotIn("env_files", stored)
-            self.assertNotIn("from-file", metadata)
-            self.assertNotIn(str(env_file), metadata)
+                self.assertEqual(output.read_text(encoding="utf-8"), "from-file")
+                metadata = Path(config.meta_path).read_text(encoding="utf-8")
+                stored = json.loads(metadata)
+                self.assertNotIn("env", stored)
+                self.assertNotIn("env_files", stored)
+                self.assertNotIn("from-file", metadata)
+                self.assertNotIn(str(env_file), metadata)
+                # File creation precedes interpreter shutdown. Wait for the
+                # child to release its log handle before removing the directory.
+                wait_until(
+                    lambda: not check_running(stored["pid"], stored["create_time"])
+                )
+            finally:
+                self.cleanup_config(config)
 
     def test_missing_environment_file_fails_before_reserving_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
