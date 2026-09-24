@@ -113,6 +113,24 @@ inspection permissions; it does not prove a foreign service exists. Diagnose the
 configured address, command, logs, and listener. Offer a different port when
 appropriate; do not terminate whatever occupies the old one.
 
+For a failed member with healthy peers that must keep running, the unreleased
+candidate supports `dmon stack repair STACK TASK --format json`. Verify the
+installed CLI supports it. Repair needs the original live supervisor; it reuses
+that supervisor's initial launch definition/environment and does not apply later
+config or dotenv edits. Check whether working-tree changes make reuse appropriate.
+An independently started replacement is a conflict and is not adopted. A still-live
+member is left unchanged, without a new readiness assertion.
+
+After repair, verify real endpoints and stack status. Later `stack down` includes
+that replacement. If the result is `unconfirmed`, inspect and recheck using its
+`--operation-id`; timeout or client interruption does not cancel the operation.
+Do not erase a stuck `starting` journal or reinterpret it as a failed spawn.
+For older supervisors, standalone `start TASK` plus configured `wait TASK` may
+restore the service, but the old stack stays degraded and does not own that new
+instance. Record the extra `stop TASK` requirement in the handoff; inspect the
+current identity before stopping. Never restart healthy peers merely to get green
+stack status. See `docs/ownership.md` for the full recovery boundary.
+
 An orphaned supervisor can leave live tasks. Once stopping those owned services
 is authorized, use `dmon stack down dev`. For an individual task, use
 `dmon stop TASK`. Inspect the result and remaining identities before claiming

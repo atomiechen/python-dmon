@@ -219,6 +219,25 @@ kill -TERM 12345
 It must perform the same reverse-order cleanup without a traceback. This checks
 the foreground supervisor; detached supervision is tested separately below.
 
+### Repair one member
+
+Use an isolated copy of this lab. Start `dmon stack up -d healthy`, inspect
+`dmon status stack-worker --format json`, and terminate only the recorded worker
+PID after checking its creation time. Keep the database and API running.
+
+```sh
+dmon stack repair healthy stack-worker --format json
+dmon stack status healthy --format json
+dmon stack down healthy
+```
+
+Database/API identities must be unchanged, the worker must have a new identity,
+and down must clean all three. Repeat with foreground `up` in another terminal;
+worker output should resume in that terminal and cross-terminal down should stop
+it. JSON must be finite and contain no ANSI or unrelated diagnostics. Automated
+`test_repair.py` covers timeout, readiness failure, concurrent clients, and crash
+boundaries without requiring subjective terminal review.
+
 ### Startup rollback
 
 Repeat startup failure with `-d` and inspect `stack status --format json`. The

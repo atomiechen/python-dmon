@@ -9,6 +9,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Add explicit `dmon stack repair STACK TASK` for live foreground/detached
+  supervisors. Preserve healthy members, reuse the retained launch environment,
+  wait for replacement readiness, and include the replacement in later cleanup.
+  Run-scoped operation IDs support rechecking uncertain client outcomes.
+
 - Add optional `ready.require_owned` for literal-loopback HTTP/TCP probes. Stack
   startup and configured waits verify a task or descendant listener and report
   `listener-unverified` when ownership cannot be confirmed.

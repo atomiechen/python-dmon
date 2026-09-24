@@ -43,6 +43,7 @@ from .constants import (
 from .logs import show_stack_logs
 from .inspection import inspect_stack, inspect_task
 from .readiness import ready_spec, wait_for_readiness
+from .repair import request_repair
 from .results import WaitResult
 from .serialization import stack_result_data, task_result_data, wait_result_data
 from .supervisor import (
@@ -308,6 +309,17 @@ def main():
         nargs="?",
     )
 
+    sp_stack_repair = stack_subparsers.add_parser(
+        "repair", help="Repair one exited member without restarting peers"
+    )
+    sp_stack_repair.add_argument("stack")
+    sp_stack_repair.add_argument("task")
+    sp_stack_repair.add_argument("--timeout", type=float, default=30)
+    sp_stack_repair.add_argument(
+        "--operation-id", help="Recheck the same repair without starting another"
+    )
+    sp_stack_repair.add_argument("--format", choices=("human", "json"), default="human")
+
     sp_stack_status = stack_subparsers.add_parser(
         "status",
         help="Show stack and member task status",
@@ -370,6 +382,7 @@ def main():
         sp_stack_up,
         sp_stack_down,
         sp_stack_restart,
+        sp_stack_repair,
         sp_stack_status,
         sp_stack_logs,
         sp_stack_list,
@@ -393,6 +406,7 @@ def main():
             "up": sp_stack_up,
             "down": sp_stack_down,
             "restart": sp_stack_restart,
+            "repair": sp_stack_repair,
             "status": sp_stack_status,
             "logs": sp_stack_logs,
             "list": sp_stack_list,
@@ -477,6 +491,16 @@ def main():
             meta_path = Path(STACK_META_PATH_TEMPLATE.format(stack=stack))
         except Exception as error:
             sp.error(str(error))
+        if args.stack_command == "repair":
+            sp.exit(
+                request_repair(
+                    meta_path,
+                    args.task.lower(),
+                    args.timeout,
+                    args.operation_id,
+                    args.format == "json",
+                )
+            )
         if args.stack_command == "down":
             sp.exit(stop_stack(meta_path))
         if args.stack_command == "status":

@@ -179,6 +179,25 @@ any runtime exit. Ctrl-C or SIGTERM cleans up a foreground stack in reverse
 order. `dmon stack down` requests the same cleanup for an active foreground or
 detached stack from another terminal.
 
+To replace an exited member while keeping healthy services running (unreleased):
+
+```sh
+dmon stack repair dev worker --format json
+dmon stack status dev --format json
+```
+
+The live supervisor starts the replacement, waits for readiness, and records it
+as a stack member. Later `stack down dev` includes that replacement. Repair uses
+the launch configuration and environment retained by that supervisor, not edits
+made after startup. See [recovery semantics](docs/ownership.md#repair-an-exited-stack-member)
+for cancellation, unsupported supervisors, and uncertain outcomes.
+
+A stack owns the instances it launched. Starting an exited member separately
+with `dmon start worker` creates a standalone replacement: it does not repair
+the original stack, and `stack down` will not stop that replacement. See
+[partial recovery and cleanup](docs/ownership.md#recover-one-failed-member-without-restarting-healthy-services)
+when healthy services must keep running.
+
 Foreground `dmon stack up` displays new task output with task-name prefixes,
 while retaining it in each task's configured `log_path`. Detached mode does not
 attach output. `dmon stack logs` reads the latest 100 lines per task by default;

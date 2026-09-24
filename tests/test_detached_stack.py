@@ -415,6 +415,59 @@ class DetachedStackTest(unittest.TestCase):
                 if (root / ".dmon" / "dev.stack.json").exists():
                     self.run_dmon(root, "stack", "down")
 
+    def test_standalone_replacement_is_not_adopted_or_stopped_by_stack(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = {
+                "tasks": {
+                    name: [sys.executable, "-c", "import time; time.sleep(60)"]
+                    for name in ("api", "worker")
+                },
+                "stacks": {"dev": ["api", "worker"]},
+            }
+            (root / "dmon.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+            stack_path = root / ".dmon" / "dev.stack.json"
+            worker_path = root / ".dmon" / "worker.meta.json"
+            try:
+                self.assert_dmon_success(
+                    root, self.run_dmon(root, "stack", "up", "-d", "dev")
+                )
+                original = self.wait_for_stack_state(stack_path, "running")
+                api, worker = original["tasks"]
+                process = psutil.Process(worker["pid"])
+                self.assertEqual(process.create_time(), worker["create_time"])
+                process.terminate()
+                self.wait_for_stack_state(stack_path, "degraded")
+                self.assert_dmon_success(root, self.run_dmon(root, "start", "worker"))
+                replacement_bytes = worker_path.read_bytes()
+                replacement = json.loads(replacement_bytes)
+                self.assertNotEqual(
+                    (replacement["pid"], replacement["create_time"]),
+                    (worker["pid"], worker["create_time"]),
+                )
+                status = self.run_dmon(root, "stack", "status", "dev")
+                self.assertNotEqual(status.returncode, 0)
+                self.assertIn("Degraded", status.stderr)
+                saved = json.loads(stack_path.read_text(encoding="utf-8"))
+                self.assertEqual(saved["tasks"][1]["pid"], worker["pid"])
+                self.assertTrue(check_running(api["pid"], api["create_time"]))
+                self.assert_dmon_success(
+                    root, self.run_dmon(root, "stack", "down", "dev")
+                )
+                self.assertFalse(check_running(api["pid"], api["create_time"]))
+                self.assertTrue(
+                    check_running(replacement["pid"], replacement["create_time"])
+                )
+                self.assertEqual(worker_path.read_bytes(), replacement_bytes)
+                self.assert_dmon_success(root, self.run_dmon(root, "stop", "worker"))
+                self.assertFalse(
+                    check_running(replacement["pid"], replacement["create_time"])
+                )
+            finally:
+                if stack_path.exists():
+                    self.run_dmon(root, "stack", "down", "dev")
+                self.run_dmon(root, "stop", "worker")
+
     def test_concurrent_detached_start_has_one_owner(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

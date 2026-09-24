@@ -84,10 +84,19 @@ output so machine-readable output can be added without breaking terminal use.
   startup failure, readiness timeout, requested stop, or unexpected supervisor
   error must still run cleanup.
 - An active stack persists its foreground or detached mode, supervisor identity,
-  and immutable task process
-  identities it owns. `down` uses a per-run, cross-platform stop request, then
+  and the task process identities it owns. Each identity is immutable; explicit
+  repair may replace an exited member through the owning supervisor. `down` uses
+  a per-run, cross-platform stop request, then
   falls back to those identities if the supervisor has crashed; it must never
   infer ownership from task names or the current configuration.
+- Repair runs inside the live supervisor, serially with monitoring. Record the
+  replacement identity before readiness, and roll back only that replacement on
+  repair failure. Requests bind to a run and expected member identity. Never
+  adopt a standalone replacement by name. Client timeout is an unconfirmed
+  outcome, not cancellation. Preserve an unresolved spawn journal on cleanup.
+- New supervisors retain each task's resolved launch environment in memory for
+  repair; do not persist it. Config/dotenv edits apply on a new stack launch,
+  not on repair. Startup environment errors remain sanitized in saved metadata.
 - Reserve stack metadata atomically. Concurrent foreground or detached starts
   must have exactly one owner, and failed or corrupt metadata remains
   diagnosable. Normal foreground cleanup removes its ownership metadata;

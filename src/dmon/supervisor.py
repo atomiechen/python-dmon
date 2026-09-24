@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from copy import deepcopy
 from pathlib import Path
 import signal
 import subprocess
@@ -35,6 +36,7 @@ from .readiness import (
     ready_spec,
     wait_for_readiness,
 )
+from .repair import RepairServer, unresolved_start
 from .results import StackSnapshot
 from .types import (
     DmonMeta,
@@ -85,6 +87,7 @@ def up(
     abort_on_exit: bool = False,
     attach_logs: bool = True,
     failure_callback: Optional[FailureCallback] = None,
+    repair_server: Optional[RepairServer] = None,
 ) -> int:
     started: list[tuple[DmonTaskConfig, DmonMeta]] = []
     exit_code = 1
@@ -112,7 +115,25 @@ def up(
             notify_state(state_callback, "starting", started)
 
     try:
-        for config in configs:
+        for original_config in configs:
+            config = deepcopy(original_config)
+            if repair_server is not None:
+                try:
+                    environment = task_environment(config)
+                except (OSError, ValueError) as error:
+                    print(
+                        f"Task '{config.task}' environment setup failed: {error}",
+                        file=sys.stderr,
+                    )
+                    if failure_callback is not None:
+                        failure_callback(
+                            f"Task '{config.task}' could not start: environment setup failed; see startup diagnostics"
+                        )
+                    print_startup_failure(config.task)
+                    break
+                config.env = dict(os.environ if environment is None else environment)
+                config.env_files = []
+                config.override_env = True
             result = start_single_result(config)
             if result.exit_code:
                 if failure_callback is not None:
@@ -150,6 +171,7 @@ def up(
                 stop_requested=stop_requested,
                 state_callback=state_callback,
                 abort_on_exit=abort_on_exit,
+                repair_server=repair_server,
             )
     except KeyboardInterrupt:
         print(
@@ -206,12 +228,26 @@ def monitor(
     stop_requested: Optional[StopCheck] = None,
     state_callback: Optional[StackStateCallback] = None,
     abort_on_exit: bool = False,
+    repair_server: Optional[RepairServer] = None,
 ) -> int:
     exited: set[int] = set()
     while True:
         if stop_requested is not None and stop_requested():
             print("Stopping stack by request...", file=sys.stderr)
             return 0
+        if repair_server is not None:
+            repair_server.poll(
+                started,
+                lambda state, tasks: notify_state(state_callback, state, tasks),
+                stop_requested or (lambda: False),
+            )
+            exited = {
+                index
+                for index in exited
+                if not check_running(
+                    started[index][1].pid, started[index][1].create_time
+                )
+            }
         for index, (config, meta) in enumerate(started):
             if refresh_descendants(meta):
                 notify_state(
@@ -498,6 +534,7 @@ def start_foreground_stack(
             state_callback=persist,
             stop_requested=lambda: stack_stop_requested(stop_path, meta.run_id),
             abort_on_exit=abort_on_exit,
+            repair_server=RepairServer(meta_path, meta),
         )
     except Exception as error:
         try:
@@ -521,6 +558,11 @@ def start_foreground_stack(
             and current.run_id == meta.run_id
             and same_stack_process(current, meta)
         ):
+            if unresolved_start(meta_path, meta.run_id):
+                current.state = "cleanup-failed"
+                current.error = "repair launch outcome unconfirmed; evidence preserved"
+                current.dump(meta_path)
+                return 1
             if current.state == "cleanup-failed":
                 current.error = (
                     "stack cleanup is incomplete; ownership metadata was preserved"
@@ -746,6 +788,7 @@ def run_detached_stack(meta_path: Path, run_id: str, poll_interval: float = 0.5)
             abort_on_exit=meta.abort_on_exit,
             attach_logs=False,
             failure_callback=failures.append,
+            repair_server=RepairServer(meta_path, meta),
         )
     except Exception as error:
         try:
@@ -769,6 +812,11 @@ def run_detached_stack(meta_path: Path, run_id: str, poll_interval: float = 0.5)
             and current.run_id == run_id
             and current.pid == os.getpid()
         ):
+            if unresolved_start(meta_path, meta.run_id):
+                current.state = "cleanup-failed"
+                current.error = "repair launch outcome unconfirmed; evidence preserved"
+                current.dump(meta_path)
+                return 1
             if result == 0 and stop_path.exists():
                 meta_path.unlink(missing_ok=True)
                 stop_path.unlink(missing_ok=True)
@@ -834,6 +882,19 @@ def stop_stack(meta_path: Path, poll_interval: float = 0.1) -> int:
         print(f"Stack metadata cannot be read: {error}", file=sys.stderr)
         return 1
 
+    try:
+        if unresolved_start(meta_path, meta.run_id):
+            print(
+                "Repair launch outcome is unconfirmed; inspect preserved task and repair records before cleanup. No replacement was adopted.",
+                file=sys.stderr,
+            )
+            return 1
+    except (OSError, ValueError, TypeError) as error:
+        print(
+            f"Repair evidence cannot be read: {error}; metadata was preserved.",
+            file=sys.stderr,
+        )
+        return 1
     cleanup_code = cleanup_stack_tasks(meta.tasks)
     if cleanup_code:
         print(

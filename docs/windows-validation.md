@@ -7,6 +7,10 @@ Use native Windows Python and PowerShell/cmd. WSL or Linux containers do not
 validate Windows process and console behavior. Read `AGENTS.md`, `README.md`,
 `CONTRIBUTING.md`, `docs/ownership.md`, and `tests/manual/README.md` first.
 
+For the current stack repair candidate, use the narrower
+[repair validation handoff](stack-repair-validation.md) to avoid repeating
+unaffected native checks.
+
 ## Pin and collect the baseline
 
 Use a dedicated checkout at the commit supplied with the validation request.
