@@ -419,7 +419,10 @@ class RepairTest(unittest.TestCase):
             ready={
                 "http": f"http://127.0.0.1:{port}/",
                 "require_owned": True,
-                "timeout": 0.5,
+                # This budget also covers the initial real server launch and
+                # listener inspection, which can exceed 0.5s on Windows 3.8.
+                # Keep the foreign-listener rejection assertions below intact.
+                "timeout": 5,
                 "interval": 0.05,
             },
         )
